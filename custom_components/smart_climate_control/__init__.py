@@ -210,6 +210,9 @@ class SmartClimateCoordinator:
         self.last_sent_temperature = None
         self.last_sent_hvac_mode = None
         
+        self.last_heat_pump_start: Optional[float] = None  # Az utolsó bekapcsolás ideje
+        self.min_runtime: float = self.entry.options.get("min_run_time", 0) * 60  # Minimum futásidő másodpercben (30 perc)
+        
         # Temperature settings
         self.comfort_temp = self.config.get(CONF_COMFORT_TEMP, DEFAULT_COMFORT_TEMP)
         self.eco_temp = self.config.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP)
@@ -301,9 +304,13 @@ class SmartClimateCoordinator:
                     room_temp, outside_temp, avg_house_temp, base_temp, door_open
                 )
                 
+                original_temperature = temperature
+                if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
+                    offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
+                    temperature += offset_value
+                
                 # Apply weather compensation for heating
                 weather_compensation = 0
-                original_temperature = temperature
                 has_outside_sensor = self.config.get(CONF_OUTSIDE_SENSOR) is not None
                 
                 if action == "on" and has_outside_sensor and outside_temp < 0 and temperature is not None:
@@ -475,20 +482,33 @@ class SmartClimateCoordinator:
         self, room_temp: Optional[float], outside_temp: float,
         avg_house_temp: Optional[float], base_temp: float, door_open: bool
     ) -> tuple[str, Optional[float], str]:
-        """Calculate heating control action and temperature."""
+        """Calculate heating control action and temperature, considering min runtime."""
+        import time
+    
+        # Ha a hőpumpa már ON és a minimum futásidő nem telt el, mindig ON
+        if self.last_heat_pump_start is not None:
+            elapsed = time.time() - self.last_heat_pump_start
+            if elapsed < self.min_runtime:
+                return "on", base_temp, f"Minimum runtime active"
+    
+        # Door open
         if door_open:
             return "off", base_temp, "Door open"
-        
+    
+        # Manual override
         if self.override_mode:
             return "on", base_temp, "Manual override"
-            
+    
+        # Presence check
         someone_home = await self._check_presence_status()
         if not someone_home:
             return "off", base_temp, "Nobody home"
-        
+    
+        # Schedule off
         if self.schedule_mode == "off" and not self.force_eco_mode:
             return "off", base_temp, "Schedule off"
-        
+    
+        # Average house temperature limit
         if avg_house_temp is not None:
             if self.last_avg_house_over_limit:
                 if avg_house_temp > (self.max_house_temp - 0.5):
@@ -498,19 +518,26 @@ class SmartClimateCoordinator:
                 return "off", base_temp, "House temp limit"
             else:
                 self.last_avg_house_over_limit = False
-        
+    
+        # Room temperature deadband
         if room_temp is None:
             return "off", base_temp, "No room temp data"
-        
-        # Deadband control for HEATING
+    
         turn_on_temp = base_temp - self.deadband_below
         turn_off_temp = base_temp + self.deadband_above
-        
+    
         if room_temp <= turn_on_temp:
+            # Ha bekapcsol, jegyezzük az időt
+            self.last_heat_pump_start = time.time()
             return "on", base_temp, f"Heating needed ({room_temp:.1f}°C <= {turn_on_temp:.1f}°C)"
         elif room_temp >= turn_off_temp:
             return "off", base_temp, f"Too hot ({room_temp:.1f}°C >= {turn_off_temp:.1f}°C)"
         else:
+            # Deadband: ha éppen ON, ellenőrizzük a min runtime-ot
+            if self.current_action == "on" and self.last_heat_pump_start is not None:
+                elapsed = time.time() - self.last_heat_pump_start
+                if elapsed < self.min_runtime:
+                    return "on", base_temp, "Min runtime active"
             return self.current_action, base_temp, "In deadband"
     
     async def _calculate_cooling_control(
@@ -539,26 +566,36 @@ class SmartClimateCoordinator:
             return self.current_action, base_temp, "In deadband"
     
     async def _control_heat_pump_directly(self, action: str, temperature: Optional[float], hvac_mode: str) -> None:
-        """Control the heat pump entity directly."""
-        # Check if we need to send a command
+        """Control the heat pump entity directly with minimum runtime enforcement."""
+        import time
+        now = time.time()
+    
+        # Ellenőrizzük, ha kikapcsolásra készül, hogy a minimum futásidő letelt-e
+        if action == "off" and self.last_heat_pump_start is not None:
+            runtime = now - self.last_heat_pump_start
+            if runtime < self.min_runtime:
+                _LOGGER.info(f"Minimum runtime not reached ({runtime:.0f}s < {self.min_runtime}s), keeping heat pump on.")
+                return
+    
         if action == self.last_sent_action and temperature == self.last_sent_temperature and hvac_mode == self.last_sent_hvac_mode:
             return
-            
+    
         heat_pump_state = self.hass.states.get(self.heat_pump_entity_id)
         if not heat_pump_state:
             _LOGGER.error(f"Heat pump entity {self.heat_pump_entity_id} not found")
             return
-            
+    
         current_hvac_mode = heat_pump_state.state
         current_temp = heat_pump_state.attributes.get('temperature')
-        
+    
         self.last_sent_action = action
         self.last_sent_temperature = temperature
         self.last_sent_hvac_mode = hvac_mode
-        
+    
         if action == "on" and temperature is not None:
-            if current_hvac_mode != hvac_mode or current_temp != temperature:
-                _LOGGER.info(f"Smart Climate: Setting heat pump to {hvac_mode} at {temperature}°C")
+            self.last_heat_pump_start = now  # Frissítjük a bekapcsolás idejét
+            for attempt in range(3):
+                _LOGGER.info(f"Sending heat pump command: mode={hvac_mode}, temp={temperature}°C (attempt {attempt+1}/3)")
                 await self.hass.services.async_call(
                     "climate",
                     "set_temperature",
@@ -569,16 +606,57 @@ class SmartClimateCoordinator:
                     },
                     blocking=True,
                 )
-                    
+    
+                await asyncio.sleep(8)
+                new_state = self.hass.states.get(self.heat_pump_entity_id)
+    
+                if not new_state:
+                    continue
+    
+                new_temp = new_state.attributes.get("temperature")
+                new_mode = new_state.state
+                hvac_action = new_state.attributes.get("hvac_action", "off")
+    
+                if (
+                    new_temp == temperature and
+                    new_mode == hvac_mode and
+                    hvac_action not in ["off", "idle"]
+                ):
+                    _LOGGER.info(f" Heat pump acknowledged command on attempt {attempt+1}")
+                    break
+                else:
+                    _LOGGER.warning(
+                        f" Heat pump did not respond properly on attempt {attempt+1}: "
+                        f"mode={new_mode}, hvac_action={hvac_action}, temp={new_temp}"
+                    )
+                    await asyncio.sleep(3)
+            else:
+                _LOGGER.error(f" Failed to start heat pump after 3 attempts")
         elif action == "off":
-            if current_hvac_mode != "off":
-                _LOGGER.info(f"Smart Climate: Turning off heat pump")
+            for attempt in range(3):
+                _LOGGER.info(f"Turning off heat pump (attempt {attempt+1}/3)")
                 await self.hass.services.async_call(
                     "climate",
                     SERVICE_TURN_OFF,
                     {"entity_id": self.heat_pump_entity_id},
                     blocking=True,
                 )
+    
+                await asyncio.sleep(12)
+    
+                new_state = self.hass.states.get(self.heat_pump_entity_id)
+                if not new_state:
+                    continue
+    
+                if new_state.state == "off":
+                    _LOGGER.info("Heat pump successfully turned off.")
+                    break
+                else:
+                    _LOGGER.warning(f"Heat pump still on after attempt {attempt+1}, current state: {new_state.state}")
+                    await asyncio.sleep(5)
+    
+
+    
     
     async def _verify_heat_pump_with_contact_sensor(self) -> None:
         """Verify heat pump is actually running using contact sensor."""
@@ -599,7 +677,7 @@ class SmartClimateCoordinator:
         vents_open = vent_state.state == "on"
         
         if not vents_open:
-            _LOGGER.warning(f"⚠️  Heat pump command may have failed - contact sensor shows not running. Retrying...")
+            _LOGGER.warning(f"  Heat pump command may have failed - contact sensor shows not running. Retrying...")
             
             heat_pump_state = self.hass.states.get(self.heat_pump_entity_id)
             if heat_pump_state:
@@ -620,14 +698,14 @@ class SmartClimateCoordinator:
                 verify_state = self.hass.states.get(contact_sensor)
                 
                 if verify_state and verify_state.state == "on":
-                    _LOGGER.info(f"✅ Heat pump started after retry")
+                    _LOGGER.info(f" Heat pump started after retry")
                     await self.hass.services.async_call(
                         "persistent_notification",
                         "dismiss",
                         {"notification_id": "smart_climate_heat_pump_alert"}
                     )
                 else:
-                    _LOGGER.error(f"❌ Heat pump still not running after retry")
+                    _LOGGER.error(f" Heat pump still not running after retry")
                     await self.hass.services.async_call(
                         "persistent_notification",
                         "create",
@@ -638,7 +716,7 @@ class SmartClimateCoordinator:
                         }
                     )
         else:
-            _LOGGER.debug(f"✅ Heat pump verified running via contact sensor")
+            _LOGGER.debug(f" Heat pump verified running via contact sensor")
             await self.hass.services.async_call(
                 "persistent_notification",
                 "dismiss",
@@ -673,13 +751,26 @@ class SmartClimateCoordinator:
         original_temperature: Optional[float] = None, weather_compensation: float = 0,
         has_outside_sensor: bool = True, mode: str = "heat"
     ) -> str:
-        """Format debug text for display."""
+        """Format debug text for display, including remaining minimum runtime in minutes."""
+        import time
+    
         room_str = f"{room_temp:.1f}" if room_temp is not None else "N/A"
-        
-        # Simplified for cooling mode
+        avg_str = f"{avg_house_temp:.1f}" if avg_house_temp is not None else "N/A"
+        outside_str = f"{outside_temp:.1f}°C" if has_outside_sensor and outside_temp is not None else "N/A"
+    
+        # Számoljuk a hátralévő minimum runtime időt percekben
+        runtime_info = ""
+        if self.last_heat_pump_start is not None and action == "on":
+            elapsed = time.time() - self.last_heat_pump_start
+            remaining = max(0, self.min_runtime - elapsed)
+            if remaining > 0:
+                minutes = int(remaining / 60)
+                runtime_info = f" | Min runtime remaining: {minutes} min"
+    
+        # Cooling mode egyszerűsített szöveg
         if mode == "cool":
             if action == "off":
-                return f"COOL OFF | R: {room_str}°C | {reason}"
+                return f"COOL OFF | R: {room_str}°C | {reason}{runtime_info}"
             else:
                 temp_str = f"{temperature}°C"
                 clean_reason = reason
@@ -687,17 +778,13 @@ class SmartClimateCoordinator:
                     clean_reason = "Cooling needed"
                 elif "Too cold (" in reason:
                     clean_reason = "Too cold"
-                return f"COOL ON | {temp_str} | R: {room_str}°C | {clean_reason}"
-        
-        # Full display for heating mode
-        avg_str = f"{avg_house_temp:.1f}" if avg_house_temp is not None else "N/A"
-        if has_outside_sensor and outside_temp is not None:
-            outside_str = f"{outside_temp:.1f}°C"
-        else:
-            outside_str = "N/A"
-        
+                return f"COOL ON | {temp_str} | R: {room_str}°C | {clean_reason}{runtime_info}"
+    
+        # Heating mode teljes szöveg
         if action == "off":
-            return f"OFF | R: {room_str}°C | H: {avg_str}°C | O: {outside_str} | {reason}"
+            offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
+            offset_str = f" | Offset: {offset_value}°C" if offset_value else ""
+            return f"OFF | R: {room_str}°C | H: {avg_str}°C | O: {outside_str}{offset_str} | {reason}{runtime_info}"
         else:
             if self.override_mode:
                 mode_str = "Force Comfort"
@@ -709,19 +796,28 @@ class SmartClimateCoordinator:
                 mode_str = "Eco"
             else:
                 mode_str = "Comfort"
-            
+    
+            offset_str = ""
+            if mode_str in ["Comfort", "Force Comfort"]:
+                offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
+                offset_str = f" | Offset: {offset_value}°C" if offset_value else ""
+    
             temp_str = f"{temperature}°C"
             if weather_compensation > 0 and original_temperature is not None:
                 temp_str = f"{temperature}°C (B:{original_temperature}°C +{weather_compensation:.1f}°C)"
-            
+    
             clean_reason = reason
             if "Heating needed (" in reason:
                 clean_reason = "Heating needed"
             elif "Too hot (" in reason:
                 clean_reason = "Too hot"
-                
-            return f"ON | {mode_str} {temp_str} | R: {room_str}°C | H: {avg_str}°C | O: {outside_str} | {clean_reason}"
     
+            return f"ON | {mode_str} {temp_str} | R: {room_str}°C | H: {avg_str}°C | O: {outside_str}{offset_str} | {clean_reason}{runtime_info}"
+
+
+
+
+
     async def enable_smart_control(self, enable: bool) -> None:
         """Enable or disable smart control."""
         _LOGGER.info(f"Smart control {'enabled' if enable else 'disabled'}")
