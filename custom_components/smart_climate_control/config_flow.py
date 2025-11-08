@@ -29,6 +29,8 @@ from .const import (
     CONF_WEATHER_COMP_FACTOR,
     CONF_MAX_COMP_TEMP,
     CONF_MIN_COMP_TEMP,
+    CONF_COMFORT_OFFSET,
+    CONF_MIN_RUN_TIME,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -37,6 +39,8 @@ from .const import (
     DEFAULT_WEATHER_COMP_FACTOR,
     DEFAULT_MAX_COMP_TEMP,
     DEFAULT_MIN_COMP_TEMP,
+    DEFAULT_COMFORT_OFFSET,
+    DEFAULT_MIN_RUN_TIME,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -237,6 +241,22 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                     default=self.config_entry.options.get(CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=14, max=20, step=0.5, mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional(
+                    CONF_COMFORT_OFFSET,
+                    default=self.config_entry.options.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=0, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_RUN_TIME,
+                    default=self.config_entry.options.get(CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=10, max=120, step=5, mode="slider", unit_of_measurement="min"
+                    )
                 ),
                 vol.Optional(
                     CONF_SCHEDULE_ENTITY,
