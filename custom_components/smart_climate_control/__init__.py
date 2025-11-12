@@ -2,6 +2,7 @@ import logging
 import asyncio
 from datetime import timedelta
 from typing import Any, Dict, Optional
+import time #! <<< VÁLTOZÁS: Ezt áthelyeztem ide fel, mert több helyen is kell
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -128,7 +129,7 @@ async def _setup_device_links(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 suggested_area=original_area,
             )
             _LOGGER.info(f"Updated Smart Climate device area to: {original_area}")
-                
+            
     except Exception as e:
         _LOGGER.error(f"FAILED to move heat pump entity: {e}")
         return
@@ -205,6 +206,11 @@ class SmartClimateCoordinator:
         self.sleep_mode_active = False
         self.debug_text = "System initializing..."
         self.smart_control_active = False
+        
+        #! <<< VÁLTOZÁS: Új változók az attribútumoknak >>>
+        self.comfort_offset_applied = 0.0
+        self.min_runtime_remaining_minutes = 0
+        #! <<< VÉGE >>>
         
         self.last_sent_action = None
         self.last_sent_temperature = None
@@ -305,9 +311,14 @@ class SmartClimateCoordinator:
                 )
                 
                 original_temperature = temperature
+                
+                #! <<< VÁLTOZÁS: Offset számítás és tárolás >>>
+                self.comfort_offset_applied = 0.0 # Alaphelyzetbe állítjuk
                 if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
                     offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
                     temperature += offset_value
+                    self.comfort_offset_applied = offset_value # Itt tároljuk el
+                #! <<< VÉGE >>>
                 
                 # Apply weather compensation for heating
                 weather_compensation = 0
@@ -319,6 +330,15 @@ class SmartClimateCoordinator:
                     temperature = max(temperature, self.min_comp_temp)
                     temperature = round(temperature)
                 
+                #! <<< VÁLTOZÁS: Minimum futásidő számítás és tárolás >>>
+                self.min_runtime_remaining_minutes = 0 # Alaphelyzetbe állítjuk
+                if self.last_heat_pump_start is not None and action == "on":
+                    elapsed = time.time() - self.last_heat_pump_start
+                    remaining = max(0, self.min_runtime - elapsed)
+                    if remaining > 0:
+                        self.min_runtime_remaining_minutes = int(remaining / 60) # Itt tároljuk el
+                #! <<< VÉGE >>>
+                
                 self.debug_text = self._format_debug_text(
                     action, temperature, room_temp, None, outside_temp, reason,
                     original_temperature, weather_compensation, has_outside_sensor, "heat"
@@ -326,6 +346,11 @@ class SmartClimateCoordinator:
             
             # For COOLING mode - simplified logic
             else:  # cooling
+                #! <<< VÁLTOZÁS: Hűtésnél nullázzuk az értékeket >>>
+                self.comfort_offset_applied = 0.0
+                self.min_runtime_remaining_minutes = 0
+                #! <<< VÉGE >>>
+                
                 base_temp = self.cooling_temp
                 action, temperature, reason = await self._calculate_cooling_control(
                     room_temp, base_temp, door_open
@@ -345,11 +370,14 @@ class SmartClimateCoordinator:
             await self._verify_heat_pump_with_contact_sensor()
             
             # Fire event for state update
+            #! <<< VÁLTOZÁS: Event bővítése az új adatokkal >>>
             self.hass.bus.async_fire(f"{DOMAIN}_state_updated", {
                 "entry_id": self.entry.entry_id,
                 "action": action,
                 "temperature": temperature,
                 "debug": self.debug_text,
+                "comfort_offset_applied": self.comfort_offset_applied, # ÚJ
+                "min_runtime_remaining_minutes": self.min_runtime_remaining_minutes # ÚJ
             })
             
         except Exception as e:
@@ -390,7 +418,7 @@ class SmartClimateCoordinator:
             self.door_open_time = None
         
         return False
- 
+
     async def _check_sleep_status(self) -> None:
         """Check if sleep mode should be active (heating only)."""
         bed_sensors = self.config.get(CONF_BED_SENSORS, [])
@@ -460,7 +488,7 @@ class SmartClimateCoordinator:
             return state_value in ['on', 'home']
         else:
             return state_value not in ['away', 'not_home', 'not home', 'off', '0', 'false', 'unknown', 'unavailable']
- 
+
     def _determine_base_temperature(self) -> float:
         """Determine the base target temperature (heating only)."""
         if self.force_comfort_mode:
@@ -483,7 +511,7 @@ class SmartClimateCoordinator:
         avg_house_temp: Optional[float], base_temp: float, door_open: bool
     ) -> tuple[str, Optional[float], str]:
         """Calculate heating control action and temperature, considering min runtime."""
-        import time
+        # import time #! <<< VÁLTOZÁS: Ezt kivettem, felül már importáltuk
     
         # Ha a hőpumpa már ON és a minimum futásidő nem telt el, mindig ON
         if self.last_heat_pump_start is not None:
@@ -567,7 +595,7 @@ class SmartClimateCoordinator:
     
     async def _control_heat_pump_directly(self, action: str, temperature: Optional[float], hvac_mode: str) -> None:
         """Control the heat pump entity directly with minimum runtime enforcement."""
-        import time
+        # import time #! <<< VÁLTOZÁS: Ezt kivettem, felül már importáltuk
         now = time.time()
     
         # Ellenőrizzük, ha kikapcsolásra készül, hogy a minimum futásidő letelt-e
@@ -752,20 +780,17 @@ class SmartClimateCoordinator:
         has_outside_sensor: bool = True, mode: str = "heat"
     ) -> str:
         """Format debug text for display, including remaining minimum runtime in minutes."""
-        import time
+        # import time #! <<< VÁLTOZÁS: Ezt kivettem, már nem kell
     
         room_str = f"{room_temp:.1f}" if room_temp is not None else "N/A"
         avg_str = f"{avg_house_temp:.1f}" if avg_house_temp is not None else "N/A"
         outside_str = f"{outside_temp:.1f}°C" if has_outside_sensor and outside_temp is not None else "N/A"
     
-        # Számoljuk a hátralévő minimum runtime időt percekben
+        #! <<< VÁLTOZÁS: Egyszerűsített runtime kiolvasás >>>
         runtime_info = ""
-        if self.last_heat_pump_start is not None and action == "on":
-            elapsed = time.time() - self.last_heat_pump_start
-            remaining = max(0, self.min_runtime - elapsed)
-            if remaining > 0:
-                minutes = int(remaining / 60)
-                runtime_info = f" | Min runtime remaining: {minutes} min"
+        if self.min_runtime_remaining_minutes > 0:
+            runtime_info = f" | Min runtime remaining: {self.min_runtime_remaining_minutes} min"
+        #! <<< VÉGE >>>
     
         # Cooling mode egyszerűsített szöveg
         if mode == "cool":
@@ -797,10 +822,11 @@ class SmartClimateCoordinator:
             else:
                 mode_str = "Comfort"
     
+            #! <<< VÁLTOZÁS: Egyszerűsített offset kiolvasás >>>
             offset_str = ""
-            if mode_str in ["Comfort", "Force Comfort"]:
-                offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
-                offset_str = f" | Offset: {offset_value}°C" if offset_value else ""
+            if self.comfort_offset_applied != 0:
+                offset_str = f" | Offset: {self.comfort_offset_applied}°C"
+            #! <<< VÉGE >>>
     
             temp_str = f"{temperature}°C"
             if weather_compensation > 0 and original_temperature is not None:
@@ -813,9 +839,6 @@ class SmartClimateCoordinator:
                 clean_reason = "Too hot"
     
             return f"ON | {mode_str} {temp_str} | R: {room_str}°C | H: {avg_str}°C | O: {outside_str}{offset_str} | {clean_reason}{runtime_info}"
-
-
-
 
 
     async def enable_smart_control(self, enable: bool) -> None:
