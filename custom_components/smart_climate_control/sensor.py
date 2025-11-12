@@ -87,6 +87,11 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "weather_comp_factor": self.coordinator.weather_comp_factor,
             "max_comp_temp": self.coordinator.max_comp_temp,
             "min_comp_temp": self.coordinator.min_comp_temp,
+
+            #! <<< VÁLTOZÁS: Ide add hozzá az új attribútumokat >>>
+            "comfort_offset_applied": self.coordinator.comfort_offset_applied,
+            "min_runtime_remaining_minutes": self.coordinator.min_runtime_remaining_minutes
+            #! <<< VÉGE >>>
         }
 
 
@@ -161,4 +166,3 @@ class SmartClimateTargetSensor(SmartClimateBaseSensor):
             return "force_eco" if self.coordinator.force_eco_mode else "sleep_eco"
         else:
             return self.coordinator.schedule_mode
-
