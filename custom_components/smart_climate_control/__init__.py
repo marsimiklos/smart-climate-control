@@ -42,6 +42,7 @@ from .const import (
     CONF_MAX_COMP_TEMP,
     CONF_MIN_COMP_TEMP,
     CONF_PRESENCE_TRACKER,
+    CONF_LOW_TEMP_THRESHOLD,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -51,6 +52,7 @@ from .const import (
     DEFAULT_WEATHER_COMP_FACTOR,
     DEFAULT_MAX_COMP_TEMP,
     DEFAULT_MIN_COMP_TEMP,
+    DEFAULT_LOW_TEMP_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -257,6 +259,24 @@ class SmartClimateCoordinator:
     def min_comp_temp(self) -> float:
         return self._get_config_value(CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP)
     
+    @property
+    def low_temp_threshold(self) -> float:
+        return self._get_config_value(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
+    
+    @property
+    def is_comfort_mode_active(self) -> bool:
+        """Check if we are in a comfort-oriented mode (eligible for offset/temperating)."""
+        if self.force_comfort_mode:
+            return True
+        if self.override_mode:
+            return True
+        if self.force_eco_mode or self.sleep_mode_active:
+            return False
+        if self.schedule_mode == "comfort":
+            return True
+        # Boost, Eco, Off in schedule -> False (Szigorúan a "csak comfort" kérés alapján)
+        return False
+    
     @staticmethod
     async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Handle options update."""
@@ -266,6 +286,17 @@ class SmartClimateCoordinator:
             coordinator.cooling_temp = coordinator._get_config_value(CONF_COOLING_TEMP, DEFAULT_COOLING_TEMP)
             await coordinator.async_update()
     
+    async def async_save_state(self) -> None:
+        """Save current state to storage, including persistent runtime variables."""
+        await self.store.async_save({
+            "comfort_temp": self.comfort_temp,
+            "eco_temp": self.eco_temp,
+            "boost_temp": self.boost_temp,
+            "cooling_temp": self.cooling_temp,
+            "smart_control_enabled": self.smart_control_enabled,
+            "last_heat_pump_start": self.last_heat_pump_start, #! <<< VÁLTOZÁS: Futásidő mentése
+        })
+
     async def async_initialize(self) -> None:
         """Initialize the coordinator."""
         stored_data = await self.store.async_load()
@@ -275,6 +306,7 @@ class SmartClimateCoordinator:
             self.boost_temp = stored_data.get("boost_temp", self.boost_temp)
             self.cooling_temp = stored_data.get("cooling_temp", self.cooling_temp)
             self.smart_control_enabled = stored_data.get("smart_control_enabled", True)
+            self.last_heat_pump_start = stored_data.get("last_heat_pump_start") #! <<< VÁLTOZÁS: Futásidő visszatöltése
             
         _LOGGER.info(f"Smart Climate Control initialized - enabled: {self.smart_control_enabled}")
     
@@ -314,10 +346,17 @@ class SmartClimateCoordinator:
                 
                 #! <<< VÁLTOZÁS: Offset számítás és tárolás >>>
                 self.comfort_offset_applied = 0.0 # Alaphelyzetbe állítjuk
+                
+                # CSAK akkor adunk offsetet, ha "on" van, és NEM temperáló módban vagyunk
+                # Ha a reason tartalmazza a "Temperating" szót, akkor a hideg idő miatti folyamatos üzem van érvényben, offset nélkül
+                is_temperating = "Temperating" in reason
+                
                 if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
-                    offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
-                    temperature += offset_value
-                    self.comfort_offset_applied = offset_value # Itt tároljuk el
+                    # Ha NEM temperálunk ÉS Comfort módban vagyunk, akkor mehet az offset
+                    if not is_temperating and self.is_comfort_mode_active:
+                        offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
+                        temperature += offset_value
+                        self.comfort_offset_applied = offset_value # Itt tároljuk el
                 #! <<< VÉGE >>>
                 
                 # Apply weather compensation for heating
@@ -558,14 +597,32 @@ class SmartClimateCoordinator:
             # Ha bekapcsol, jegyezzük az időt
             self.last_heat_pump_start = time.time()
             return "on", base_temp, f"Heating needed ({room_temp:.1f}°C <= {turn_on_temp:.1f}°C)"
+            
         elif room_temp >= turn_off_temp:
-            return "off", base_temp, f"Too hot ({room_temp:.1f}°C >= {turn_off_temp:.1f}°C)"
+            #! <<< VÁLTOZÁS: Itt a lényeg. Ha hideg van kint, nem kapcsolunk le, csak az offsetet vesszük el. >>>
+            # CSAK akkor, ha Comfort módban vagyunk! (Eco-ban spórolunk)
+            if self.is_comfort_mode_active and outside_temp < self.low_temp_threshold:
+                # Biztonsági ellenőrzés: Ha NAGYON meleg van (pl. cél + 1.0 fok), akkor mindenképp lekapcsol
+                # Ezzel elkerüljük, hogy véletlenül megsüljünk
+                safety_cutoff = turn_off_temp + 1.0
+                if room_temp >= safety_cutoff:
+                     return "off", base_temp, f"Overheating protection ({room_temp:.1f}°C)"
+
+                # Különben maradunk ON, de az indok "Temperating", ami miatt az async_update nem tesz rá offsetet
+                return "on", base_temp, f"Temperating (Low Temp: {outside_temp:.1f}°C < {self.low_temp_threshold}°C)"
+            else:
+                # Normál működés (vagy Eco mód hidegben): meleg van kint, vagy spórolunk -> lekapcsolunk
+                return "off", base_temp, f"Too hot ({room_temp:.1f}°C >= {turn_off_temp:.1f}°C)"
         else:
             # Deadband: ha éppen ON, ellenőrizzük a min runtime-ot
             if self.current_action == "on" and self.last_heat_pump_start is not None:
                 elapsed = time.time() - self.last_heat_pump_start
                 if elapsed < self.min_runtime:
                     return "on", base_temp, "Min runtime active"
+            
+            # Ha a deadbandben vagyunk, és hideg van kint, és épp fűtünk (ON),
+            # akkor is "Temperating" módba válthatunk, ha közeledünk a célhoz, 
+            # de itt egyelőre hagyjuk a jelenlegi állapotot.
             return self.current_action, base_temp, "In deadband"
     
     async def _calculate_cooling_control(
@@ -622,6 +679,9 @@ class SmartClimateCoordinator:
     
         if action == "on" and temperature is not None:
             self.last_heat_pump_start = now  # Frissítjük a bekapcsolás idejét
+            #! <<< VÁLTOZÁS: Itt elmentjük az állapotot, hogy a futásidő megmaradjon! >>>
+            await self.async_save_state()
+            
             for attempt in range(3):
                 _LOGGER.info(f"Sending heat pump command: mode={hvac_mode}, temp={temperature}°C (attempt {attempt+1}/3)")
                 await self.hass.services.async_call(
@@ -826,6 +886,8 @@ class SmartClimateCoordinator:
             offset_str = ""
             if self.comfort_offset_applied != 0:
                 offset_str = f" | Offset: {self.comfort_offset_applied}°C"
+            elif "Temperating" in reason:
+                offset_str = " | Temperating (No Offset)"
             #! <<< VÉGE >>>
     
             temp_str = f"{temperature}°C"
@@ -846,13 +908,8 @@ class SmartClimateCoordinator:
         _LOGGER.info(f"Smart control {'enabled' if enable else 'disabled'}")
         self.smart_control_enabled = enable
         
-        await self.store.async_save({
-            "comfort_temp": self.comfort_temp,
-            "eco_temp": self.eco_temp,
-            "boost_temp": self.boost_temp,
-            "cooling_temp": self.cooling_temp,
-            "smart_control_enabled": self.smart_control_enabled,
-        })
+        #! <<< VÁLTOZÁS: Használjuk a központi mentést >>>
+        await self.async_save_state()
         
         if not enable:
             await self._release_control()
@@ -879,12 +936,7 @@ class SmartClimateCoordinator:
         self.boost_temp = DEFAULT_BOOST_TEMP
         self.cooling_temp = DEFAULT_COOLING_TEMP
         
-        await self.store.async_save({
-            "comfort_temp": self.comfort_temp,
-            "eco_temp": self.eco_temp,
-            "boost_temp": self.boost_temp,
-            "cooling_temp": self.cooling_temp,
-            "smart_control_enabled": self.smart_control_enabled,
-        })
+        #! <<< VÁLTOZÁS: Használjuk a központi mentést >>>
+        await self.async_save_state()
         
         await self.async_update()

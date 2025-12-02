@@ -77,12 +77,8 @@ class SmartClimateTemperatureNumber(NumberEntity):
         elif self._temp_type == "cooling":
             self.coordinator.cooling_temp = value
         
-        # Save to storage
-        await self.coordinator.store.async_save({
-            "comfort_temp": self.coordinator.comfort_temp,
-            "eco_temp": self.coordinator.eco_temp,
-            "boost_temp": self.coordinator.boost_temp,
-            "cooling_temp": self.coordinator.cooling_temp,
-        })
+        # Save to storage using the coordinator's central save method
+        # This prevents overwriting persistent variables like 'last_heat_pump_start'
+        await self.coordinator.async_save_state()
         
         await self.coordinator.async_update()

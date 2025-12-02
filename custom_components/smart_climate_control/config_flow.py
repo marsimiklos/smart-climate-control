@@ -31,6 +31,7 @@ from .const import (
     CONF_MIN_COMP_TEMP,
     CONF_COMFORT_OFFSET,
     CONF_MIN_RUN_TIME,
+    CONF_LOW_TEMP_THRESHOLD,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -41,6 +42,7 @@ from .const import (
     DEFAULT_MIN_COMP_TEMP,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_MIN_RUN_TIME,
+    DEFAULT_LOW_TEMP_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -259,6 +261,14 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                     )
                 ),
                 vol.Optional(
+                    CONF_LOW_TEMP_THRESHOLD,
+                    default=self.config_entry.options.get(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=-20, max=15, step=0.5, mode="slider", unit_of_measurement="°C"
+                    )
+                ),
+                vol.Optional(
                     CONF_SCHEDULE_ENTITY,
                     default=self.config_entry.data.get(CONF_SCHEDULE_ENTITY) or self.config_entry.options.get(CONF_SCHEDULE_ENTITY)
                 ): selector.EntitySelector(
@@ -266,6 +276,3 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
             }),
         )
-
-
-
