@@ -43,6 +43,7 @@ from .const import (
     CONF_MIN_COMP_TEMP,
     CONF_PRESENCE_TRACKER,
     CONF_LOW_TEMP_THRESHOLD,
+    CONF_SAFETY_CUTOFF,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -53,6 +54,7 @@ from .const import (
     DEFAULT_MAX_COMP_TEMP,
     DEFAULT_MIN_COMP_TEMP,
     DEFAULT_LOW_TEMP_THRESHOLD,
+    DEFAULT_SAFETY_CUTOFF,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -264,6 +266,10 @@ class SmartClimateCoordinator:
         return self._get_config_value(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
     
     @property
+    def safety_cutoff_offset(self) -> float:
+        return self._get_config_value(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
+
+    @property
     def is_comfort_mode_active(self) -> bool:
         """Check if we are in a comfort-oriented mode (eligible for offset/temperating)."""
         if self.force_comfort_mode:
@@ -347,13 +353,14 @@ class SmartClimateCoordinator:
                 #! <<< VÁLTOZÁS: Offset számítás és tárolás >>>
                 self.comfort_offset_applied = 0.0 # Alaphelyzetbe állítjuk
                 
-                # CSAK akkor adunk offsetet, ha "on" van, és NEM temperáló módban vagyunk
+                # CSAK akkor adunk offsetet, ha "on" van, és NEM temperáló módban vagyunk, ÉS NEM min runtime
                 # Ha a reason tartalmazza a "Temperating" szót, akkor a hideg idő miatti folyamatos üzem van érvényben, offset nélkül
                 is_temperating = "Temperating" in reason
+                is_min_runtime = "runtime" in reason # Védjük ki a "Minimum runtime active" eseteket is
                 
                 if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
-                    # Ha NEM temperálunk ÉS Comfort módban vagyunk, akkor mehet az offset
-                    if not is_temperating and self.is_comfort_mode_active:
+                    # Ha NEM temperálunk, NEM min runtime, ÉS Comfort módban vagyunk, akkor mehet az offset
+                    if not is_temperating and not is_min_runtime and self.is_comfort_mode_active:
                         offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
                         temperature += offset_value
                         self.comfort_offset_applied = offset_value # Itt tároljuk el
@@ -602,9 +609,9 @@ class SmartClimateCoordinator:
             #! <<< VÁLTOZÁS: Itt a lényeg. Ha hideg van kint, nem kapcsolunk le, csak az offsetet vesszük el. >>>
             # CSAK akkor, ha Comfort módban vagyunk! (Eco-ban spórolunk)
             if self.is_comfort_mode_active and outside_temp < self.low_temp_threshold:
-                # Biztonsági ellenőrzés: Ha NAGYON meleg van (pl. cél + 1.0 fok), akkor mindenképp lekapcsol
+                # Biztonsági ellenőrzés: Ha NAGYON meleg van (pl. cél + safety_cutoff_offset), akkor mindenképp lekapcsol
                 # Ezzel elkerüljük, hogy véletlenül megsüljünk
-                safety_cutoff = turn_off_temp + 1.0
+                safety_cutoff = turn_off_temp + self.safety_cutoff_offset #! <<< VÁLTOZÁS: Beállított érték használata >>>
                 if room_temp >= safety_cutoff:
                      return "off", base_temp, f"Overheating protection ({room_temp:.1f}°C)"
 

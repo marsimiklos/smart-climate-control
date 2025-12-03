@@ -61,7 +61,8 @@
           "min_comp_temp": "Min Compensated Temperature (°C)",
           "comfort_temp_offset": "Heating Offset (Boost start) (°C)",
           "min_run_time": "Minimum Run Time (minutes)",
-          "low_temp_threshold": "Continuous Run Outside Temp Threshold (°C)"
+          "low_temp_threshold": "Continuous Run Outside Temp Threshold (°C)",
+          "safety_cutoff": "Overheating Safety Offset (above Deadband) (°C)"
         }
       }
     }

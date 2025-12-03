@@ -32,6 +32,7 @@ from .const import (
     CONF_COMFORT_OFFSET,
     CONF_MIN_RUN_TIME,
     CONF_LOW_TEMP_THRESHOLD,
+    CONF_SAFETY_CUTOFF,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -43,6 +44,7 @@ from .const import (
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_MIN_RUN_TIME,
     DEFAULT_LOW_TEMP_THRESHOLD,
+    DEFAULT_SAFETY_CUTOFF,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -266,6 +268,14 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=-20, max=15, step=0.5, mode="slider", unit_of_measurement="°C"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SAFETY_CUTOFF,
+                    default=self.config_entry.options.get(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=0.5, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
                     )
                 ),
                 vol.Optional(
