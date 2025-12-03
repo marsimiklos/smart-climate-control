@@ -73,6 +73,10 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
     def extra_state_attributes(self):
         """Return extra attributes including deadband settings."""
         heat_pump_state = self.coordinator.current_heat_pump_state
+        
+        # Check if temperating mode is active based on debug text
+        is_temperating = "Temperating" in self.coordinator.debug_text
+        
         return {
             "smart_control_enabled": self.coordinator.smart_control_enabled,
             "controlled_entity": self.coordinator.heat_pump_entity_id,
@@ -87,11 +91,11 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "weather_comp_factor": self.coordinator.weather_comp_factor,
             "max_comp_temp": self.coordinator.max_comp_temp,
             "min_comp_temp": self.coordinator.min_comp_temp,
-
-            #! <<< VÁLTOZÁS: Ide add hozzá az új attribútumokat >>>
+            # Ezek a fontosak a temperáláshoz:
             "comfort_offset_applied": self.coordinator.comfort_offset_applied,
-            "min_runtime_remaining_minutes": self.coordinator.min_runtime_remaining_minutes
-            #! <<< VÉGE >>>
+            "min_runtime_remaining_minutes": self.coordinator.min_runtime_remaining_minutes,
+            # ÚJ attribútum: Igaz, ha a rendszer épp temperál (folyamatos üzem hidegben)
+            "is_temperating": is_temperating,
         }
 
 
