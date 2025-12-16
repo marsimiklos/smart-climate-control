@@ -353,14 +353,14 @@ class SmartClimateCoordinator:
                 #! <<< VÁLTOZÁS: Offset számítás és tárolás >>>
                 self.comfort_offset_applied = 0.0 # Alaphelyzetbe állítjuk
                 
-                # CSAK akkor adunk offsetet, ha "on" van, és NEM temperáló módban vagyunk, ÉS NEM min runtime
+                # CSAK akkor adunk offsetet, ha "on" van, és NEM temperáló módban vagyunk
                 # Ha a reason tartalmazza a "Temperating" szót, akkor a hideg idő miatti folyamatos üzem van érvényben, offset nélkül
                 is_temperating = "Temperating" in reason
-                is_min_runtime = "runtime" in reason # Védjük ki a "Minimum runtime active" eseteket is
+                # is_min_runtime = "runtime" in reason #! <<< VÁLTOZÁS: KIVÉVE! >>> Mostantól a min runtime alatt is LEGYEN offset
                 
                 if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
-                    # Ha NEM temperálunk, NEM min runtime, ÉS Comfort módban vagyunk, akkor mehet az offset
-                    if not is_temperating and not is_min_runtime and self.is_comfort_mode_active:
+                    # Ha NEM temperálunk (de lehet min runtime), ÉS Comfort módban vagyunk, akkor mehet az offset
+                    if not is_temperating and self.is_comfort_mode_active:
                         offset_value = self.entry.options.get("comfort_temp_offset", 0.0)
                         temperature += offset_value
                         self.comfort_offset_applied = offset_value # Itt tároljuk el
