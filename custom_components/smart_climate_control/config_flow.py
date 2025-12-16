@@ -182,7 +182,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry # Javítva: _config_entry használata
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
         """Manage the options."""
@@ -194,61 +194,61 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Optional(
                     CONF_COMFORT_TEMP,
-                    default=self.config_entry.options.get(CONF_COMFORT_TEMP, DEFAULT_COMFORT_TEMP)
+                    default=self._config_entry.options.get(CONF_COMFORT_TEMP, DEFAULT_COMFORT_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=16, max=25, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_ECO_TEMP,
-                    default=self.config_entry.options.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP)
+                    default=self._config_entry.options.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=16, max=25, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_BOOST_TEMP,
-                    default=self.config_entry.options.get(CONF_BOOST_TEMP, DEFAULT_BOOST_TEMP)
+                    default=self._config_entry.options.get(CONF_BOOST_TEMP, DEFAULT_BOOST_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=16, max=25, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_DEADBAND_BELOW,
-                    default=self.config_entry.options.get(CONF_DEADBAND_BELOW, DEFAULT_DEADBAND)
+                    default=self._config_entry.options.get(CONF_DEADBAND_BELOW, DEFAULT_DEADBAND)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0.1, max=2, step=0.1, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_DEADBAND_ABOVE,
-                    default=self.config_entry.options.get(CONF_DEADBAND_ABOVE, DEFAULT_DEADBAND)
+                    default=self._config_entry.options.get(CONF_DEADBAND_ABOVE, DEFAULT_DEADBAND)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0.1, max=2, step=0.1, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_MAX_HOUSE_TEMP,
-                    default=self.config_entry.options.get(CONF_MAX_HOUSE_TEMP, DEFAULT_MAX_HOUSE_TEMP)
+                    default=self._config_entry.options.get(CONF_MAX_HOUSE_TEMP, DEFAULT_MAX_HOUSE_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_WEATHER_COMP_FACTOR,
-                    default=self.config_entry.options.get(CONF_WEATHER_COMP_FACTOR, DEFAULT_WEATHER_COMP_FACTOR)
+                    default=self._config_entry.options.get(CONF_WEATHER_COMP_FACTOR, DEFAULT_WEATHER_COMP_FACTOR)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=1, step=0.1, mode="slider")
                 ),
                 vol.Optional(
                     CONF_MAX_COMP_TEMP,
-                    default=self.config_entry.options.get(CONF_MAX_COMP_TEMP, DEFAULT_MAX_COMP_TEMP)
+                    default=self._config_entry.options.get(CONF_MAX_COMP_TEMP, DEFAULT_MAX_COMP_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_MIN_COMP_TEMP,
-                    default=self.config_entry.options.get(CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP)
+                    default=self._config_entry.options.get(CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=14, max=20, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_COMFORT_OFFSET,
-                    default=self.config_entry.options.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
+                    default=self._config_entry.options.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=0, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
@@ -256,7 +256,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_MIN_RUN_TIME,
-                    default=self.config_entry.options.get(CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME)
+                    default=self._config_entry.options.get(CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=10, max=120, step=5, mode="slider", unit_of_measurement="min"
@@ -264,7 +264,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_LOW_TEMP_THRESHOLD,
-                    default=self.config_entry.options.get(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
+                    default=self._config_entry.options.get(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=-20, max=15, step=0.5, mode="slider", unit_of_measurement="°C"
@@ -272,7 +272,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_SAFETY_CUTOFF,
-                    default=self.config_entry.options.get(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
+                    default=self._config_entry.options.get(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=0.5, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
@@ -280,7 +280,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_SCHEDULE_ENTITY,
-                    default=self.config_entry.data.get(CONF_SCHEDULE_ENTITY) or self.config_entry.options.get(CONF_SCHEDULE_ENTITY)
+                    default=self._config_entry.data.get(CONF_SCHEDULE_ENTITY) or self._config_entry.options.get(CONF_SCHEDULE_ENTITY)
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="schedule")
                 ),
