@@ -132,6 +132,7 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the options step."""
         if user_input is not None:
             self.data.update(user_input)
+            # ITT lépünk tovább a szellőztetés beállításokra
             return await self.async_step_ventilation()
 
         return self.async_show_form(
@@ -157,6 +158,46 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_WEATHER_COMP_FACTOR, default=DEFAULT_WEATHER_COMP_FACTOR): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=1, step=0.1, mode="slider")
+                ),
+                vol.Optional(CONF_MAX_COMP_TEMP, default=DEFAULT_MAX_COMP_TEMP): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional(CONF_MIN_COMP_TEMP, default=DEFAULT_MIN_COMP_TEMP): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=14, max=20, step=0.5, mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional(CONF_COMFORT_OFFSET, default=DEFAULT_COMFORT_OFFSET): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=0, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
+                    )
+                ),
+                vol.Optional(CONF_MIN_RUN_TIME, default=DEFAULT_MIN_RUN_TIME): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=10, max=120, step=5, mode="slider", unit_of_measurement="min"
+                    )
+                ),
+                vol.Optional(CONF_LOW_TEMP_THRESHOLD, default=DEFAULT_LOW_TEMP_THRESHOLD): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=-20, max=15, step=0.5, mode="slider", unit_of_measurement="°C"
+                    )
+                ),
+                vol.Optional(CONF_SAFETY_CUTOFF, default=DEFAULT_SAFETY_CUTOFF): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=0.5, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
+                    )
+                ),
+                vol.Optional(CONF_WINDOW_DELAY, default=DEFAULT_WINDOW_DELAY): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=0, max=30, step=0.5, mode="slider", unit_of_measurement="min"
+                    )
+                ),
+                vol.Optional(
+                    CONF_WINDOW_SENSORS,
+                    default=self._config_entry.options.get(CONF_WINDOW_SENSORS) or self._config_entry.data.get(CONF_WINDOW_SENSORS, [])
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["binary_sensor", "input_boolean"],
+                        multiple=True
+                    )
                 ),
             }),
         )
@@ -244,6 +285,10 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 self._config_entry, data=self._config_entry.data, options=user_input
             )
             return await self.async_step_ventilation_options()
+
+        # Get defaults from options or fallback to data
+        def get_opt(key, default):
+            return self._config_entry.options.get(key) or self._config_entry.data.get(key, default)
 
         return self.async_show_form(
             step_id="init",

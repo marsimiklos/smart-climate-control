@@ -55,7 +55,7 @@ class SmartClimateBaseSensor(SensorEntity):
 
 
 class SmartClimateStatusSensor(SmartClimateBaseSensor):
-    """Status sensor showing current smart control logic."""
+    """Status sensor showing current smart control logic and detailed diagnostics."""
 
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "status", "Status")
@@ -69,18 +69,47 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
 
     @property
     def extra_state_attributes(self):
+        """Return extensive details about the current state."""
         heat_pump_state = self.coordinator.current_heat_pump_state
         is_temperating = "Temperating" in self.coordinator.debug_text
         
+        # Calculate window timer
+        window_timer_min = 0
+        if self.coordinator.window_open_start is not None:
+            import time
+            window_timer_min = round((time.time() - self.coordinator.window_open_start) / 60, 1)
+
         return {
+            # --- General System State ---
             "smart_control_enabled": self.coordinator.smart_control_enabled,
+            "current_action": self.coordinator.current_action,
+            "current_hvac_mode": self.coordinator.current_hvac_mode,
+            
+            # --- Heat Pump Details ---
             "controlled_entity": self.coordinator.heat_pump_entity_id,
             "heat_pump_mode": heat_pump_state.get("hvac_mode"),
             "heat_pump_action": heat_pump_state.get("hvac_action"),
             "heat_pump_temperature": heat_pump_state.get("temperature"),
+            "heat_pump_current_temp": heat_pump_state.get("current_temperature"),
+            
+            # --- Control Logic Parameters ---
+            "deadband_below": self.coordinator.deadband_below,
+            "deadband_above": self.coordinator.deadband_above,
+            "max_house_temp": self.coordinator.max_house_temp,
+            "weather_comp_factor": self.coordinator.weather_comp_factor,
+            "max_comp_temp": self.coordinator.max_comp_temp,
+            "min_comp_temp": self.coordinator.min_comp_temp,
+            
+            # --- Advanced Logic States ---
             "comfort_offset_applied": self.coordinator.comfort_offset_applied,
             "min_runtime_remaining_minutes": self.coordinator.min_runtime_remaining_minutes,
             "is_temperating": is_temperating,
+            "last_avg_house_over_limit": self.coordinator.last_avg_house_over_limit,
+            
+            # --- Window Logic ---
+            "window_open_active": self.coordinator.window_open_start is not None,
+            "window_open_duration_min": window_timer_min,
+            "window_delay_setting": self.coordinator.window_delay_minutes,
         }
 
 
@@ -110,6 +139,7 @@ class SmartClimateModeSensor(SmartClimateBaseSensor):
             "force_comfort": self.coordinator.override_mode,
             "force_eco": self.coordinator.force_eco_mode,
             "sleep_active": self.coordinator.sleep_mode_active,
+            "schedule_mode": self.coordinator.schedule_mode, # Kept for internal logic ref if needed, though unused
         }
 
 class SmartClimateTargetSensor(SmartClimateBaseSensor):
@@ -132,6 +162,7 @@ class SmartClimateTargetSensor(SmartClimateBaseSensor):
             "comfort_temp": self.coordinator.comfort_temp,
             "eco_temp": self.coordinator.eco_temp,
             "boost_temp": self.coordinator.boost_temp,
+            "cooling_temp": self.coordinator.cooling_temp,
         }
 
 class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
@@ -158,13 +189,25 @@ class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
         elif self.coordinator.vent_current_phase == 2:
             phase_text = "Phase 2 (A IN / B OUT)"
             
+        import time
+        cycle_elapsed = 0
+        if self.coordinator.vent_cycle_start_time:
+             cycle_elapsed = int(time.time() - self.coordinator.vent_cycle_start_time)
+             
+        run_elapsed_min = 0
+        if self.coordinator.vent_start_time:
+             run_elapsed_min = round((time.time() - self.coordinator.vent_start_time) / 60, 1)
+
         return {
             "is_running": self.coordinator.vent_is_running,
             "reason": self.coordinator.vent_reason,
             "current_phase_id": self.coordinator.vent_current_phase,
             "current_phase_desc": phase_text,
-            "cycle_time": self.coordinator.vent_cycle_time,
-            "run_duration": self.coordinator.vent_run_duration,
+            "cycle_time_setting": self.coordinator.vent_cycle_time,
+            "cycle_elapsed_sec": cycle_elapsed,
+            "run_duration_setting": self.coordinator.vent_run_duration,
+            "run_elapsed_min": run_elapsed_min,
             "auto_interval_hours": self.coordinator.vent_auto_interval,
             "humidity_threshold": self.coordinator.humidity_threshold,
+            "last_auto_run": self.coordinator.last_vent_auto_run,
         }

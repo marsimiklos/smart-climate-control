@@ -238,7 +238,6 @@ class SmartClimateCoordinator:
         self.override_mode = False
         self.force_eco_mode = False
         self.force_comfort_mode = False
-        # self.schedule_mode = "comfort" # REMOVED
         self.current_action = "off"
         self.current_hvac_mode = "heat"
         self.last_avg_house_over_limit = False
@@ -326,7 +325,7 @@ class SmartClimateCoordinator:
         if self.force_comfort_mode: return True
         if self.override_mode: return True
         if self.force_eco_mode or self.sleep_mode_active: return False
-        # No schedule mode anymore, assume default is comfort
+        # Default is comfort now
         return True
     
     @staticmethod
@@ -586,7 +585,6 @@ class SmartClimateCoordinator:
             if self.current_hvac_mode == "heat":
                 avg_house_temp = await self._get_sensor_value(self.config.get(CONF_AVERAGE_SENSOR))
                 await self._check_sleep_status()
-                # await self._check_schedule_status() # REMOVED
                 base_temp = self._determine_base_temperature()
                 
                 action, temperature, reason = await self._calculate_heating_control(
@@ -718,8 +716,6 @@ class SmartClimateCoordinator:
             bed_sensor = self.hass.states.get(bed_sensors[0])
             if bed_sensor:
                 self.sleep_mode_active = (bed_sensor.state == "on")
-    
-    # REMOVED: _check_schedule_status
             
     async def _check_presence_status(self) -> bool:
         """Check if someone is home."""
