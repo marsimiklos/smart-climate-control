@@ -25,7 +25,7 @@ async def async_setup_entry(
         SmartClimateStatusSensor(coordinator, config_entry),
         SmartClimateModeSensor(coordinator, config_entry),
         SmartClimateTargetSensor(coordinator, config_entry),
-        SmartClimateVentStatusSensor(coordinator, config_entry), # NEW
+        SmartClimateVentStatusSensor(coordinator, config_entry),
     ]
     
     async_add_entities(entities)
@@ -139,7 +139,6 @@ class SmartClimateModeSensor(SmartClimateBaseSensor):
             "force_comfort": self.coordinator.override_mode,
             "force_eco": self.coordinator.force_eco_mode,
             "sleep_active": self.coordinator.sleep_mode_active,
-            "schedule_mode": self.coordinator.schedule_mode, # Kept for internal logic ref if needed, though unused
         }
 
 class SmartClimateTargetSensor(SmartClimateBaseSensor):

@@ -18,7 +18,7 @@ CONF_DEADBAND_BELOW = "deadband_below"
 CONF_DEADBAND_ABOVE = "deadband_above"
 CONF_MAX_HOUSE_TEMP = "max_house_temp"
 CONF_WEATHER_COMP_FACTOR = "weather_comp_factor"
-CONF_SCHEDULE_ENTITY = "schedule_entity"
+# CONF_SCHEDULE_ENTITY eltávolítva
 CONF_MAX_COMP_TEMP = "max_comp_temp"
 CONF_MIN_COMP_TEMP = "min_comp_temp"
 CONF_COMFORT_OFFSET = "comfort_temp_offset"

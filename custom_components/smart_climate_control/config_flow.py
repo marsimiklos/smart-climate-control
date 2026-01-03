@@ -20,7 +20,6 @@ from .const import (
     CONF_WINDOW_DELAY,
     CONF_BED_SENSORS,
     CONF_PRESENCE_TRACKER,
-    CONF_SCHEDULE_ENTITY,
     CONF_HEAT_PUMP_CONTACT,
     CONF_COMFORT_TEMP,
     CONF_ECO_TEMP,
@@ -191,12 +190,6 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Optional(
-                    CONF_SCHEDULE_ENTITY,
-                    default=self._config_entry.data.get(CONF_SCHEDULE_ENTITY) or self._config_entry.options.get(CONF_SCHEDULE_ENTITY)
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="schedule")
-                ),
-                vol.Optional(
                     CONF_WINDOW_SENSORS,
                     default=self._config_entry.options.get(CONF_WINDOW_SENSORS) or self._config_entry.data.get(CONF_WINDOW_SENSORS, [])
                 ): selector.EntitySelector(
@@ -223,11 +216,9 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_FAN_GROUP_B): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="fan", multiple=True)
                 ),
-                # Módosítva: multiple=True
                 vol.Optional(CONF_HUMIDITY_SENSOR_A): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True)
                 ),
-                # Módosítva: multiple=True
                 vol.Optional(CONF_HUMIDITY_SENSOR_B): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True)
                 ),
@@ -463,13 +454,11 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="fan", multiple=True)
                 ),
-                # Módosítva: Listát kezelő default és selector
                 vol.Optional(
                     CONF_HUMIDITY_SENSOR_A, default=get_list_opt(CONF_HUMIDITY_SENSOR_A)
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True)
                 ),
-                # Módosítva: Listát kezelő default és selector
                 vol.Optional(
                     CONF_HUMIDITY_SENSOR_B, default=get_list_opt(CONF_HUMIDITY_SENSOR_B)
                 ): selector.EntitySelector(
