@@ -16,6 +16,8 @@ from .const import (
     CONF_OUTSIDE_SENSOR,
     CONF_AVERAGE_SENSOR,
     CONF_DOOR_SENSOR,
+    CONF_WINDOW_SENSORS,
+    CONF_WINDOW_DELAY,
     CONF_BED_SENSORS,
     CONF_PRESENCE_TRACKER,
     CONF_SCHEDULE_ENTITY,
@@ -45,6 +47,7 @@ from .const import (
     DEFAULT_MIN_RUN_TIME,
     DEFAULT_LOW_TEMP_THRESHOLD,
     DEFAULT_SAFETY_CUTOFF,
+    DEFAULT_WINDOW_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,6 +98,14 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_AVERAGE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
                 ),
+                # ÚJ: Több elemű választó ablakoknak/ajtóknak
+                vol.Optional(CONF_WINDOW_SENSORS): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["binary_sensor", "input_boolean"],
+                        multiple=True
+                    )
+                ),
+                # Régi mező megtartása opcionálisként a biztonság kedvéért (vagy eltávolítható)
                 vol.Optional(CONF_DOOR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="binary_sensor", device_class="door")
                 ),
@@ -182,7 +193,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
-        self._config_entry = config_entry # Javítva: _config_entry használata
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
         """Manage the options."""
@@ -278,11 +289,30 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                      min=0.5, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
                     )
                 ),
+                # ÚJ: Késleltetés beállítása
+                vol.Optional(
+                    CONF_WINDOW_DELAY,
+                    default=self._config_entry.options.get(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                     min=0, max=30, step=0.5, mode="slider", unit_of_measurement="min"
+                    )
+                ),
                 vol.Optional(
                     CONF_SCHEDULE_ENTITY,
                     default=self._config_entry.data.get(CONF_SCHEDULE_ENTITY) or self._config_entry.options.get(CONF_SCHEDULE_ENTITY)
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="schedule")
+                ),
+                # ÚJ: Itt is lehessen módosítani a szenzorokat
+                vol.Optional(
+                    CONF_WINDOW_SENSORS,
+                    default=self._config_entry.options.get(CONF_WINDOW_SENSORS) or self._config_entry.data.get(CONF_WINDOW_SENSORS, [])
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["binary_sensor", "input_boolean"],
+                        multiple=True
+                    )
                 ),
             }),
         )

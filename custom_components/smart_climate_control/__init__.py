@@ -28,6 +28,8 @@ from .const import (
     CONF_OUTSIDE_SENSOR,
     CONF_AVERAGE_SENSOR,
     CONF_DOOR_SENSOR,
+    CONF_WINDOW_SENSORS,  # ÚJ
+    CONF_WINDOW_DELAY,    # ÚJ
     CONF_BED_SENSORS,
     CONF_SCHEDULE_ENTITY,
     CONF_HEAT_PUMP_CONTACT,
@@ -55,6 +57,7 @@ from .const import (
     DEFAULT_MIN_COMP_TEMP,
     DEFAULT_LOW_TEMP_THRESHOLD,
     DEFAULT_SAFETY_CUTOFF,
+    DEFAULT_WINDOW_DELAY, # ÚJ
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -206,7 +209,7 @@ class SmartClimateCoordinator:
         self.current_action = "off"
         self.current_hvac_mode = "heat"  # Track whether we're heating or cooling
         self.last_avg_house_over_limit = False
-        self.door_open_time = None
+        self.window_open_start = None # ÁTNEVEZVE: door_open_time helyett
         self.sleep_mode_active = False
         self.debug_text = "System initializing..."
         self.smart_control_active = False
@@ -266,6 +269,11 @@ class SmartClimateCoordinator:
     @property
     def safety_cutoff_offset(self) -> float:
         return self._get_config_value(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
+
+    @property
+    def window_delay_minutes(self) -> float:
+        """Get window delay in minutes."""
+        return self._get_config_value(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
 
     @property
     def is_comfort_mode_active(self) -> bool:
@@ -332,8 +340,8 @@ class SmartClimateCoordinator:
             else:
                 outside_temp = 5.0
             
-            # Simplified for cooling - only check door status
-            door_open = await self._check_door_status()
+            # ÚJ: Bővített ablaknyitás ellenőrzés
+            window_open_status = await self._check_window_status()
             
             # For HEATING mode
             if self.current_hvac_mode == "heat":
@@ -343,7 +351,7 @@ class SmartClimateCoordinator:
                 base_temp = self._determine_base_temperature()
                 
                 action, temperature, reason = await self._calculate_heating_control(
-                    room_temp, outside_temp, avg_house_temp, base_temp, door_open
+                    room_temp, outside_temp, avg_house_temp, base_temp, window_open_status
                 )
                 
                 original_temperature = temperature
@@ -395,7 +403,7 @@ class SmartClimateCoordinator:
                 
                 base_temp = self.cooling_temp
                 action, temperature, reason = await self._calculate_cooling_control(
-                    room_temp, base_temp, door_open
+                    room_temp, base_temp, window_open_status
                 )
                 
                 self.debug_text = self._format_debug_text(
@@ -443,22 +451,50 @@ class SmartClimateCoordinator:
         
         return default
     
-    async def _check_door_status(self) -> bool:
-        """Check if door has been open too long."""
+    async def _check_window_status(self) -> bool:
+        """Check if any window/door has been open too long (with configurable delay)."""
+        
+        # 1. Összegyűjtjük a nyitott szenzorokat
+        open_sensors = []
+        
+        # A) Új lista ellenőrzése
+        window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
+        if window_sensors:
+            for sensor_id in window_sensors:
+                state = self.hass.states.get(sensor_id)
+                if state and state.state in ["on", "true", "open"]:
+                    open_sensors.append(sensor_id)
+
+        # B) Régi (legacy) szenzor ellenőrzése
         door_sensor = self.config.get(CONF_DOOR_SENSOR)
-        if not door_sensor:
-            return False
+        if door_sensor:
+            state = self.hass.states.get(door_sensor)
+            if state and state.state in ["on", "true", "open"]:
+                open_sensors.append(door_sensor)
         
-        state = self.hass.states.get(door_sensor)
-        if state and state.state == "on":
-            if self.door_open_time is None:
-                self.door_open_time = self.hass.loop.time()
-            elif self.hass.loop.time() - self.door_open_time > 70:
-                return True
+        # 2. Időzítés logika
+        if open_sensors:
+            if self.window_open_start is None:
+                # Most nyílt ki, indítjuk az órát
+                self.window_open_start = time.time()
+                _LOGGER.debug(f"Window/Door opened: {open_sensors}. Timer started.")
+                return False # Még nem járt le az idő
+            else:
+                # Már nyitva van, nézzük az időt
+                elapsed_minutes = (time.time() - self.window_open_start) / 60
+                configured_delay = self.window_delay_minutes
+                
+                if elapsed_minutes > configured_delay:
+                    _LOGGER.debug(f"Window open for {elapsed_minutes:.1f} min (limit: {configured_delay} min). Disable action triggered.")
+                    return True # Lejárt az idő, le kell kapcsolni
+                else:
+                    return False # Még tart a türelmi idő
         else:
-            self.door_open_time = None
-        
-        return False
+            # Minden zárva
+            if self.window_open_start is not None:
+                _LOGGER.debug("All windows/doors closed. Timer reset.")
+            self.window_open_start = None
+            return False
 
     async def _check_sleep_status(self) -> None:
         """Check if sleep mode should be active (heating only)."""
@@ -549,7 +585,7 @@ class SmartClimateCoordinator:
     
     async def _calculate_heating_control(
         self, room_temp: Optional[float], outside_temp: float,
-        avg_house_temp: Optional[float], base_temp: float, door_open: bool
+        avg_house_temp: Optional[float], base_temp: float, window_open: bool
     ) -> tuple[str, Optional[float], str]:
         """Calculate heating control action and temperature, considering min runtime."""
         # Ha a hőpumpa már ON és a minimum futásidő nem telt el, mindig ON
@@ -558,9 +594,9 @@ class SmartClimateCoordinator:
             if elapsed < self.min_runtime:
                 return "on", base_temp, f"Minimum runtime active"
     
-        # Door open
-        if door_open:
-            return "off", base_temp, "Door open"
+        # Window/Door open check
+        if window_open:
+            return "off", base_temp, "Window/Door open"
     
         # Manual override
         if self.override_mode:
@@ -620,11 +656,11 @@ class SmartClimateCoordinator:
             return self.current_action, base_temp, "In deadband"
     
     async def _calculate_cooling_control(
-        self, room_temp: Optional[float], base_temp: float, door_open: bool
+        self, room_temp: Optional[float], base_temp: float, window_open: bool
     ) -> tuple[str, Optional[float], str]:
         """Calculate cooling control action and temperature (simplified)."""
-        if door_open:
-            return "off", base_temp, "Door open"
+        if window_open:
+            return "off", base_temp, "Window/Door open"
         
         someone_home = await self._check_presence_status()
         if not someone_home:
