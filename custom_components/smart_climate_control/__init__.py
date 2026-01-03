@@ -67,13 +67,13 @@ from .const import (
     CONF_VENT_MAX_DURATION,
     CONF_HUMIDITY_THRESHOLD,
     CONF_VENT_AUTO_INTERVAL,
-    CONF_VENT_FAN_SPEED, # ÚJ
+    CONF_VENT_FAN_SPEED,
     DEFAULT_VENT_CYCLE_TIME,
     DEFAULT_VENT_DURATION,
     DEFAULT_VENT_MAX_DURATION,
     DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL,
-    DEFAULT_VENT_FAN_SPEED, # ÚJ
+    DEFAULT_VENT_FAN_SPEED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -358,7 +358,8 @@ class SmartClimateCoordinator:
             "last_heat_pump_start": self.last_heat_pump_start,
             # Ventilation persistence
             "last_vent_auto_run": self.last_vent_auto_run,
-            "vent_enabled": self.vent_enabled
+            "vent_enabled": self.vent_enabled,
+            "vent_fan_speed": self.vent_fan_speed, # Mentsük a sebességet is
         })
 
     async def async_initialize(self) -> None:
@@ -374,6 +375,7 @@ class SmartClimateCoordinator:
             
             self.last_vent_auto_run = stored_data.get("last_vent_auto_run")
             self.vent_enabled = stored_data.get("vent_enabled", True)
+            self.vent_fan_speed = stored_data.get("vent_fan_speed", self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED))
             
         _LOGGER.info(f"Smart Climate initialized. Vent enabled: {self.vent_enabled}")
 
@@ -771,7 +773,7 @@ class SmartClimateCoordinator:
         if self.force_comfort_mode: return self.comfort_temp
         elif self.force_eco_mode or self.sleep_mode_active: return self.eco_temp
         elif self.override_mode: return self.comfort_temp
-        # Schedule mode logic removed
+        # Schedule mode removed
         return self.comfort_temp
     
     async def _calculate_heating_control(

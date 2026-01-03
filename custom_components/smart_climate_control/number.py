@@ -2,14 +2,15 @@ import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature, UnitOfTime
+from homeassistant.const import UnitOfTemperature, PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN, 
     DEFAULT_COMFORT_TEMP, DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_COOLING_TEMP,
-    DEFAULT_HUMIDITY_THRESHOLD, DEFAULT_VENT_CYCLE_TIME, DEFAULT_VENT_DURATION
+    DEFAULT_HUMIDITY_THRESHOLD, DEFAULT_VENT_CYCLE_TIME, DEFAULT_VENT_DURATION,
+    DEFAULT_VENT_FAN_SPEED
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ async def async_setup_entry(
         SmartClimateVentNumber(coordinator, config_entry, "humidity", "Humidity Threshold", 30, 90, "%"),
         SmartClimateVentNumber(coordinator, config_entry, "cycle_time", "Vent Cycle Time", 30, 300, "sec", step=5),
         SmartClimateVentNumber(coordinator, config_entry, "duration", "Vent Run Duration", 10, 240, "min", step=5),
+        # ÚJ: Ventilátor sebesség
+        SmartClimateVentNumber(coordinator, config_entry, "fan_speed", "Ventilation Speed", 10, 100, PERCENTAGE, step=1, mode="slider"),
     ]
     
     async_add_entities(entities)
@@ -95,7 +98,7 @@ class SmartClimateVentNumber(NumberEntity):
     _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
 
-    def __init__(self, coordinator, config_entry, param_type, name, min_val, max_val, unit, step=1):
+    def __init__(self, coordinator, config_entry, param_type, name, min_val, max_val, unit, step=1, mode=None):
         """Initialize."""
         self.coordinator = coordinator
         self._param_type = param_type
@@ -105,15 +108,22 @@ class SmartClimateVentNumber(NumberEntity):
         self._attr_native_max_value = max_val
         self._attr_native_unit_of_measurement = unit
         self._attr_native_step = step
+        if mode:
+            self._attr_mode = mode
+            
         self._attr_device_info = {
             "identifiers": {(DOMAIN, config_entry.entry_id)},
             "name": config_entry.data.get("name", "Smart Climate Control"),
         }
+        
         if param_type == "humidity":
              self._attr_icon = "mdi:water-percent"
              self._attr_mode = NumberMode.SLIDER
         elif param_type == "cycle_time":
              self._attr_icon = "mdi:timer-refresh"
+        elif param_type == "fan_speed":
+             self._attr_icon = "mdi:fan"
+             self._attr_mode = NumberMode.SLIDER
         else:
              self._attr_icon = "mdi:timer-outline"
 
@@ -125,6 +135,8 @@ class SmartClimateVentNumber(NumberEntity):
             return self.coordinator.vent_cycle_time
         elif self._param_type == "duration":
             return self.coordinator.vent_run_duration
+        elif self._param_type == "fan_speed":
+            return self.coordinator.vent_fan_speed
         return 0
 
     async def async_set_native_value(self, value: float) -> None:
@@ -134,7 +146,11 @@ class SmartClimateVentNumber(NumberEntity):
             self.coordinator.vent_cycle_time = value
         elif self._param_type == "duration":
             self.coordinator.vent_run_duration = value
+        elif self._param_type == "fan_speed":
+            self.coordinator.vent_fan_speed = int(value)
+            # If running, update speed immediately
+            if self.coordinator.vent_is_running:
+                await self.coordinator._apply_fan_directions(self.coordinator.vent_current_phase)
         
-        # We don't save to storage separately here as these are backed by config/options mostly, 
-        # but transient changes in memory are supported for the session
-        # If persistence is needed, we should update options flow, but for now runtime memory is okay for testing
+        # Save state to persist changes
+        await self.coordinator.async_save_state()
