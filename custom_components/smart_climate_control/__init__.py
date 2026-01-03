@@ -67,11 +67,13 @@ from .const import (
     CONF_VENT_MAX_DURATION,
     CONF_HUMIDITY_THRESHOLD,
     CONF_VENT_AUTO_INTERVAL,
+    CONF_VENT_FAN_SPEED, # ÚJ
     DEFAULT_VENT_CYCLE_TIME,
     DEFAULT_VENT_DURATION,
     DEFAULT_VENT_MAX_DURATION,
     DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL,
+    DEFAULT_VENT_FAN_SPEED, # ÚJ
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -275,6 +277,7 @@ class SmartClimateCoordinator:
         self.vent_auto_interval = self._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
         self.humidity_threshold = self._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
         self.vent_cycle_time = self._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
+        self.vent_fan_speed = self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED) # ÚJ
         
         self.entry.add_update_listener(self.async_options_updated)
     
@@ -325,7 +328,6 @@ class SmartClimateCoordinator:
         if self.force_comfort_mode: return True
         if self.override_mode: return True
         if self.force_eco_mode or self.sleep_mode_active: return False
-        # Default is comfort now
         return True
     
     @staticmethod
@@ -341,6 +343,7 @@ class SmartClimateCoordinator:
             coordinator.vent_auto_interval = coordinator._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
             coordinator.humidity_threshold = coordinator._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
             coordinator.vent_cycle_time = coordinator._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
+            coordinator.vent_fan_speed = coordinator._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED) # ÚJ
             
             await coordinator.async_update()
     
@@ -541,7 +544,7 @@ class SmartClimateCoordinator:
         await self._set_fans(fans_b, dir_b)
 
     async def _set_fans(self, fan_list, direction):
-        """Turn on fans and set direction."""
+        """Turn on fans and set direction and speed."""
         if not fan_list: return
         
         # Ensure fan_list is a list (handle single entity case)
@@ -550,12 +553,13 @@ class SmartClimateCoordinator:
             
         for fan in fan_list:
             try:
-                # 1. Turn ON if not on
-                state = self.hass.states.get(fan)
-                if not state or state.state != "on":
-                    await self.hass.services.async_call(
-                        "fan", "turn_on", {"entity_id": fan}, blocking=False
-                    )
+                # 1. Turn ON if not on and Set Speed (New Logic)
+                # Instead of just turning on, we set the percentage which turns it on
+                await self.hass.services.async_call(
+                    "fan", "set_percentage", 
+                    {"entity_id": fan, "percentage": self.vent_fan_speed}, 
+                    blocking=False
+                )
                 
                 # 2. Set Direction
                 # Note: Some fans need to be ON before setting direction
@@ -610,7 +614,6 @@ class SmartClimateCoordinator:
             if self.current_hvac_mode == "heat":
                 avg_house_temp = await self._get_sensor_value(self.config.get(CONF_AVERAGE_SENSOR))
                 await self._check_sleep_status()
-                # Schedule logic removed
                 base_temp = self._determine_base_temperature()
                 
                 action, temperature, reason = await self._calculate_heating_control(
@@ -768,7 +771,7 @@ class SmartClimateCoordinator:
         if self.force_comfort_mode: return self.comfort_temp
         elif self.force_eco_mode or self.sleep_mode_active: return self.eco_temp
         elif self.override_mode: return self.comfort_temp
-        # Schedule mode removed
+        # Schedule mode logic removed
         return self.comfort_temp
     
     async def _calculate_heating_control(
@@ -783,7 +786,7 @@ class SmartClimateCoordinator:
         if self.override_mode: return "on", base_temp, "Manual override"
         someone_home = await self._check_presence_status()
         if not someone_home: return "off", base_temp, "Nobody home"
-        # Schedule off removed
+        # Removed schedule "off" check
         if avg_house_temp is not None:
             if self.last_avg_house_over_limit:
                 if avg_house_temp > (self.max_house_temp - 0.5): return "off", base_temp, "House temp limit"

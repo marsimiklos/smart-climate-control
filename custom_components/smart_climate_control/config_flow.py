@@ -43,6 +43,7 @@ from .const import (
     CONF_VENT_MAX_DURATION,
     CONF_HUMIDITY_THRESHOLD,
     CONF_VENT_AUTO_INTERVAL,
+    CONF_VENT_FAN_SPEED, # ÚJ
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -61,6 +62,7 @@ from .const import (
     DEFAULT_VENT_MAX_DURATION,
     DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL,
+    DEFAULT_VENT_FAN_SPEED, # ÚJ
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -191,7 +193,7 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     CONF_WINDOW_SENSORS,
-                    default=self._config_entry.options.get(CONF_WINDOW_SENSORS) or self._config_entry.data.get(CONF_WINDOW_SENSORS, [])
+                    default=self.data.get(CONF_WINDOW_SENSORS, [])
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["binary_sensor", "input_boolean"],
@@ -237,6 +239,10 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_VENT_AUTO_INTERVAL, default=DEFAULT_VENT_AUTO_INTERVAL): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=48, step=1, mode="slider", unit_of_measurement="hours")
                 ),
+                # ÚJ: Ventilátor sebesség beállítás
+                vol.Optional(CONF_VENT_FAN_SPEED, default=DEFAULT_VENT_FAN_SPEED): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%")
+                ),
             }),
         )
 
@@ -275,19 +281,17 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry):
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._options = dict(config_entry.options)
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
         """Manage the options."""
         if user_input is not None:
-            # Save these options and move to ventilation options
-            self.hass.config_entries.async_update_entry(
-                self._config_entry, data=self._config_entry.data, options=user_input
-            )
+            self._options.update(user_input)
             return await self.async_step_ventilation_options()
 
         # Get defaults from options or fallback to data
         def get_opt(key, default):
-            return self._config_entry.options.get(key) or self._config_entry.data.get(key, default)
+            return self._config_entry.options.get(key, default)
 
         return self.async_show_form(
             step_id="init",
@@ -401,15 +405,14 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
     async def async_step_ventilation_options(self, user_input: Optional[Dict[str, Any]] = None):
         """Manage the ventilation options."""
         if user_input is not None:
-            # Merge with existing options
-            new_options = {**self._config_entry.options, **user_input}
-            return self.async_create_entry(title="", data=new_options)
+            self._options.update(user_input)
+            return self.async_create_entry(title="", data=self._options)
 
         # Get defaults from options or fallback to data
         def get_opt(key, default):
             return self._config_entry.options.get(key) or self._config_entry.data.get(key, default)
 
-        # Segédfüggvény a default érték normalizálásához (ha string jönne, listává alakítjuk)
+        # Segédfüggvény a default érték normalizálásához
         def get_list_opt(key):
             val = get_opt(key, [])
             if isinstance(val, str):
@@ -463,6 +466,12 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                     CONF_HUMIDITY_SENSOR_B, default=get_list_opt(CONF_HUMIDITY_SENSOR_B)
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True)
+                ),
+                # ÚJ: Ventilátor sebesség beállítás
+                vol.Optional(
+                    CONF_VENT_FAN_SPEED, default=get_opt(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%")
                 ),
             }),
         )
