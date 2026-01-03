@@ -20,7 +20,6 @@ from .const import (
     CONF_WINDOW_DELAY,
     CONF_BED_SENSORS,
     CONF_PRESENCE_TRACKER,
-    CONF_SCHEDULE_ENTITY,
     CONF_HEAT_PUMP_CONTACT,
     CONF_COMFORT_TEMP,
     CONF_ECO_TEMP,
@@ -35,6 +34,15 @@ from .const import (
     CONF_MIN_RUN_TIME,
     CONF_LOW_TEMP_THRESHOLD,
     CONF_SAFETY_CUTOFF,
+    CONF_FAN_GROUP_A,
+    CONF_FAN_GROUP_B,
+    CONF_HUMIDITY_SENSOR_A,
+    CONF_HUMIDITY_SENSOR_B,
+    CONF_VENT_CYCLE_TIME,
+    CONF_VENT_DURATION,
+    CONF_VENT_MAX_DURATION,
+    CONF_HUMIDITY_THRESHOLD,
+    CONF_VENT_AUTO_INTERVAL,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -48,6 +56,11 @@ from .const import (
     DEFAULT_LOW_TEMP_THRESHOLD,
     DEFAULT_SAFETY_CUTOFF,
     DEFAULT_WINDOW_DELAY,
+    DEFAULT_VENT_CYCLE_TIME,
+    DEFAULT_VENT_DURATION,
+    DEFAULT_VENT_MAX_DURATION,
+    DEFAULT_HUMIDITY_THRESHOLD,
+    DEFAULT_VENT_AUTO_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -74,10 +87,6 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not self.hass.states.get(user_input[CONF_ROOM_SENSOR]):
                 errors[CONF_ROOM_SENSOR] = "entity_not_found"
             
-            # Validate outside sensor exists (if provided)
-            if user_input.get(CONF_OUTSIDE_SENSOR) and not self.hass.states.get(user_input[CONF_OUTSIDE_SENSOR]):
-                errors[CONF_OUTSIDE_SENSOR] = "entity_not_found"
-            
             if not errors:
                 self.data = user_input
                 return await self.async_step_options()
@@ -98,22 +107,17 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_AVERAGE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
                 ),
-                # ÚJ: Több elemű választó ablakoknak/ajtóknak
                 vol.Optional(CONF_WINDOW_SENSORS): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["binary_sensor", "input_boolean"],
                         multiple=True
                     )
                 ),
-                # Régi mező megtartása opcionálisként a biztonság kedvéért (vagy eltávolítható)
                 vol.Optional(CONF_DOOR_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="binary_sensor", device_class="door")
                 ),
                 vol.Optional(CONF_HEAT_PUMP_CONTACT): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="binary_sensor")
-                ),
-                vol.Optional(CONF_SCHEDULE_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="schedule")
                 ),
                 vol.Optional(CONF_PRESENCE_TRACKER): selector.EntitySelector(
                     selector.EntitySelectorConfig(
@@ -128,7 +132,7 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the options step."""
         if user_input is not None:
             self.data.update(user_input)
-            return await self.async_step_beds()
+            return await self.async_step_ventilation()
 
         return self.async_show_form(
             step_id="options",
@@ -157,14 +161,51 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
         )
 
+    async def async_step_ventilation(self, user_input: Optional[Dict[str, Any]] = None):
+        """Handle the ventilation settings step."""
+        if user_input is not None:
+            self.data.update(user_input)
+            return await self.async_step_beds()
+
+        return self.async_show_form(
+            step_id="ventilation",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_FAN_GROUP_A): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="fan", multiple=True)
+                ),
+                vol.Optional(CONF_FAN_GROUP_B): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="fan", multiple=True)
+                ),
+                vol.Optional(CONF_HUMIDITY_SENSOR_A): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="humidity")
+                ),
+                vol.Optional(CONF_HUMIDITY_SENSOR_B): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="humidity")
+                ),
+                vol.Optional(CONF_VENT_CYCLE_TIME, default=DEFAULT_VENT_CYCLE_TIME): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=300, step=5, mode="box", unit_of_measurement="sec")
+                ),
+                vol.Optional(CONF_VENT_DURATION, default=DEFAULT_VENT_DURATION): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=240, step=10, mode="slider", unit_of_measurement="min")
+                ),
+                vol.Optional(CONF_VENT_MAX_DURATION, default=DEFAULT_VENT_MAX_DURATION): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=360, step=10, mode="slider", unit_of_measurement="min")
+                ),
+                vol.Optional(CONF_HUMIDITY_THRESHOLD, default=DEFAULT_HUMIDITY_THRESHOLD): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=90, step=1, mode="slider", unit_of_measurement="%")
+                ),
+                vol.Optional(CONF_VENT_AUTO_INTERVAL, default=DEFAULT_VENT_AUTO_INTERVAL): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=48, step=1, mode="slider", unit_of_measurement="hours")
+                ),
+            }),
+        )
+
     async def async_step_beds(self, user_input: Optional[Dict[str, Any]] = None):
         """Handle the bed sensor step."""
         if user_input is not None:
-            # Extract bed sensor if provided
             if user_input.get("bed_sensor"):
                 self.data[CONF_BED_SENSORS] = [user_input["bed_sensor"]]
             
-            # Create the config entry
             return self.async_create_entry(
                 title=self.data[CONF_NAME],
                 data=self.data,
@@ -198,7 +239,11 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
         """Manage the options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Save these options and move to ventilation options
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, data=self._config_entry.data, options=user_input
+            )
+            return await self.async_step_ventilation_options()
 
         return self.async_show_form(
             step_id="init",
@@ -289,7 +334,6 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                      min=0.5, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
                     )
                 ),
-                # ÚJ: Késleltetés beállítása
                 vol.Optional(
                     CONF_WINDOW_DELAY,
                     default=self._config_entry.options.get(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
@@ -299,13 +343,6 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                     )
                 ),
                 vol.Optional(
-                    CONF_SCHEDULE_ENTITY,
-                    default=self._config_entry.data.get(CONF_SCHEDULE_ENTITY) or self._config_entry.options.get(CONF_SCHEDULE_ENTITY)
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="schedule")
-                ),
-                # ÚJ: Itt is lehessen módosítani a szenzorokat
-                vol.Optional(
                     CONF_WINDOW_SENSORS,
                     default=self._config_entry.options.get(CONF_WINDOW_SENSORS) or self._config_entry.data.get(CONF_WINDOW_SENSORS, [])
                 ): selector.EntitySelector(
@@ -313,6 +350,68 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                         domain=["binary_sensor", "input_boolean"],
                         multiple=True
                     )
+                ),
+            }),
+        )
+
+    async def async_step_ventilation_options(self, user_input: Optional[Dict[str, Any]] = None):
+        """Manage the ventilation options."""
+        if user_input is not None:
+            # Merge with existing options
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
+
+        # Get defaults from options or fallback to data
+        def get_opt(key, default):
+            return self._config_entry.options.get(key) or self._config_entry.data.get(key, default)
+
+        return self.async_show_form(
+            step_id="ventilation_options",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_VENT_CYCLE_TIME, default=get_opt(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=300, step=5, mode="box", unit_of_measurement="sec")
+                ),
+                vol.Optional(
+                    CONF_VENT_DURATION, default=get_opt(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=240, step=10, mode="slider", unit_of_measurement="min")
+                ),
+                vol.Optional(
+                    CONF_VENT_MAX_DURATION, default=get_opt(CONF_VENT_MAX_DURATION, DEFAULT_VENT_MAX_DURATION)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=360, step=10, mode="slider", unit_of_measurement="min")
+                ),
+                vol.Optional(
+                    CONF_HUMIDITY_THRESHOLD, default=get_opt(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=90, step=1, mode="slider", unit_of_measurement="%")
+                ),
+                vol.Optional(
+                    CONF_VENT_AUTO_INTERVAL, default=get_opt(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=48, step=1, mode="slider", unit_of_measurement="hours")
+                ),
+                vol.Optional(
+                    CONF_FAN_GROUP_A, default=get_opt(CONF_FAN_GROUP_A, [])
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="fan", multiple=True)
+                ),
+                vol.Optional(
+                    CONF_FAN_GROUP_B, default=get_opt(CONF_FAN_GROUP_B, [])
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="fan", multiple=True)
+                ),
+                vol.Optional(
+                    CONF_HUMIDITY_SENSOR_A, default=get_opt(CONF_HUMIDITY_SENSOR_A, None)
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="humidity")
+                ),
+                vol.Optional(
+                    CONF_HUMIDITY_SENSOR_B, default=get_opt(CONF_HUMIDITY_SENSOR_B, None)
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="humidity")
                 ),
             }),
         )

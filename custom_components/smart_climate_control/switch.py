@@ -20,8 +20,11 @@ async def async_setup_entry(
     entities = [
         SmartClimateOverrideSwitch(coordinator, config_entry),     # Force Comfort
         SmartClimateForceEcoSwitch(coordinator, config_entry),     # Force Eco
-        SmartClimateForceCoolingSwitch(coordinator, config_entry), # Force Cooling (NEW)
+        SmartClimateForceCoolingSwitch(coordinator, config_entry), # Force Cooling
         SmartClimateEnableSwitch(coordinator, config_entry),       # Climate Management
+        # Ventilation Switches
+        SmartClimateVentEnableSwitch(coordinator, config_entry),   # Enable Vent Auto
+        SmartClimateVentManualSwitch(coordinator, config_entry),   # Start Manual Vent
     ]
     
     async_add_entities(entities)
@@ -46,7 +49,6 @@ class SmartClimateBaseSwitch(SwitchEntity):
 
     @property
     def available(self):
-        """Entity is always available - we want to show state even when disabled."""
         return True
 
 
@@ -54,18 +56,15 @@ class SmartClimateEnableSwitch(SmartClimateBaseSwitch):
     """Master enable switch for Smart Climate Control."""
 
     def __init__(self, coordinator, config_entry):
-        """Initialize the enable switch."""
         super().__init__(coordinator, config_entry, "enable", "Climate Management")
         self._attr_icon = "mdi:robot"
 
     @property
     def is_on(self):
-        """Return true if smart control is enabled."""
         return self.coordinator.smart_control_enabled
 
     @property
     def extra_state_attributes(self):
-        """Return extra state attributes."""
         heat_pump_state = self.coordinator.current_heat_pump_state
         return {
             "controlled_entity": self.coordinator.heat_pump_entity_id,
@@ -76,11 +75,9 @@ class SmartClimateEnableSwitch(SmartClimateBaseSwitch):
         }
 
     async def async_turn_on(self, **kwargs):
-        """Enable smart control."""
         await self.coordinator.enable_smart_control(True)
 
     async def async_turn_off(self, **kwargs):
-        """Disable smart control."""
         await self.coordinator.enable_smart_control(False)
 
 
@@ -88,50 +85,33 @@ class SmartClimateOverrideSwitch(SmartClimateBaseSwitch):
     """Force comfort switch - forces comfort mode when on."""
 
     def __init__(self, coordinator, config_entry):
-        """Initialize the force comfort switch."""
         super().__init__(coordinator, config_entry, "override", "Force Comfort Mode")
         self._attr_icon = "mdi:home-thermometer-outline"
 
     @property
     def is_on(self):
-        """Return true if force comfort is active."""
         return self.coordinator.override_mode and self.coordinator.current_hvac_mode == "heat"
 
     @property
-    def available(self):
-        """Always available - shows current state even when smart control disabled."""
-        return True
-
-    @property
     def extra_state_attributes(self):
-        """Return extra state attributes including why it might not be active."""
         attrs = {
             "force_comfort_mode": self.coordinator.override_mode,
             "smart_control_enabled": self.coordinator.smart_control_enabled,
             "current_hvac_mode": self.coordinator.current_hvac_mode,
         }
-        
         if self.coordinator.current_hvac_mode == "cool":
             attrs["note"] = "Force comfort not available in cooling mode"
         elif self.coordinator.override_mode and not self.coordinator.smart_control_enabled:
             attrs["note"] = "Force comfort set but smart control is disabled"
-        elif not self.coordinator.override_mode:
-            attrs["note"] = "Force comfort not active"
-        else:
-            attrs["note"] = "Force comfort active"
-            
         return attrs
 
     async def async_turn_on(self, **kwargs):
-        """Enable force comfort mode."""
-        # Switch to heating mode and enable force comfort
         self.coordinator.current_hvac_mode = "heat"
         self.coordinator.override_mode = True
         self.coordinator.force_eco_mode = False
         await self.coordinator.async_update()
 
     async def async_turn_off(self, **kwargs):
-        """Disable force comfort mode."""
         self.coordinator.override_mode = False
         await self.coordinator.async_update()
 
@@ -140,75 +120,51 @@ class SmartClimateForceEcoSwitch(SmartClimateBaseSwitch):
     """Force eco switch."""
 
     def __init__(self, coordinator, config_entry):
-        """Initialize the force eco switch."""
         super().__init__(coordinator, config_entry, "force_eco", "Force Eco Mode")
         self._attr_icon = "mdi:leaf"
 
     @property
     def is_on(self):
-        """Return true if force eco is active."""
         return self.coordinator.force_eco_mode and self.coordinator.current_hvac_mode == "heat"
 
     @property
-    def available(self):
-        """Always available - shows current state even when smart control disabled."""
-        return True
-
-    @property
     def extra_state_attributes(self):
-        """Return extra state attributes including why it might not be active."""
         attrs = {
             "force_eco_mode": self.coordinator.force_eco_mode,
             "smart_control_enabled": self.coordinator.smart_control_enabled,
             "current_hvac_mode": self.coordinator.current_hvac_mode,
+            "eco_temp": self.coordinator.eco_temp,
         }
-        
         if self.coordinator.current_hvac_mode == "cool":
             attrs["note"] = "Force eco not available in cooling mode"
         elif self.coordinator.force_eco_mode and not self.coordinator.smart_control_enabled:
             attrs["note"] = "Force eco set but smart control is disabled"
-        elif not self.coordinator.force_eco_mode:
-            attrs["note"] = "Force eco not active"
-        else:
-            attrs["note"] = "Force eco active"
-            
         return attrs
 
     async def async_turn_on(self, **kwargs):
-        """Enable force eco mode."""
-        # Switch to heating mode and enable force eco
         self.coordinator.current_hvac_mode = "heat"
         self.coordinator.force_eco_mode = True
         self.coordinator.override_mode = False
         await self.coordinator.async_update()
 
     async def async_turn_off(self, **kwargs):
-        """Disable force eco mode."""
         self.coordinator.force_eco_mode = False
         await self.coordinator.async_update()
 
 
 class SmartClimateForceCoolingSwitch(SmartClimateBaseSwitch):
-    """Force cooling switch - enables simplified cooling mode."""
+    """Force cooling switch."""
 
     def __init__(self, coordinator, config_entry):
-        """Initialize the force cooling switch."""
         super().__init__(coordinator, config_entry, "force_cooling", "Force Cooling Mode")
         self._attr_icon = "mdi:snowflake"
 
     @property
     def is_on(self):
-        """Return true if force cooling is active."""
         return self.coordinator.current_hvac_mode == "cool"
 
     @property
-    def available(self):
-        """Always available - shows current state even when smart control disabled."""
-        return True
-
-    @property
     def extra_state_attributes(self):
-        """Return extra state attributes."""
         attrs = {
             "cooling_mode": self.coordinator.current_hvac_mode == "cool",
             "smart_control_enabled": self.coordinator.smart_control_enabled,
@@ -225,17 +181,60 @@ class SmartClimateForceCoolingSwitch(SmartClimateBaseSwitch):
         return attrs
 
     async def async_turn_on(self, **kwargs):
-        """Enable cooling mode."""
         _LOGGER.info("Force Cooling: Switching to cooling mode")
-        # Switch to cooling mode and clear heating force modes
         self.coordinator.current_hvac_mode = "cool"
         self.coordinator.override_mode = False
         self.coordinator.force_eco_mode = False
         await self.coordinator.async_update()
 
     async def async_turn_off(self, **kwargs):
-        """Disable cooling mode - return to auto heating."""
         _LOGGER.info("Force Cooling: Switching back to heating mode")
-        # Switch back to heating mode (auto)
         self.coordinator.current_hvac_mode = "heat"
         await self.coordinator.async_update()
+
+# --- VENTILATION SWITCHES ---
+
+class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
+    """Master enable switch for Ventilation."""
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "vent_enable", "Ventilation Enabled")
+        self._attr_icon = "mdi:fan-auto"
+
+    @property
+    def is_on(self):
+        return self.coordinator.vent_enabled
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.enable_ventilation_control(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.enable_ventilation_control(False)
+
+
+class SmartClimateVentManualSwitch(SmartClimateBaseSwitch):
+    """Manual run switch for Ventilation."""
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "vent_manual", "Ventilation Manual Run")
+        self._attr_icon = "mdi:fan"
+
+    @property
+    def is_on(self):
+        return self.coordinator.vent_is_running
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "reason": self.coordinator.vent_reason,
+            "phase": self.coordinator.vent_current_phase,
+            "duration": self.coordinator.vent_run_duration
+        }
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.vent_manual_mode = True
+        await self.coordinator.start_ventilation_cycle("Manual Switch")
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.vent_manual_mode = False
+        await self.coordinator.stop_ventilation("Manual Switch Off")

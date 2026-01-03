@@ -168,7 +168,7 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
         elif self.coordinator.force_eco_mode or self.coordinator.sleep_mode_active:
             return "force_eco" if self.coordinator.force_eco_mode else "sleep_eco"
         else:
-            return self.coordinator.schedule_mode
+            return "comfort"
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Set new target temperature."""
@@ -182,8 +182,6 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
                 # For heating, update based on active mode
                 if self._get_active_mode() == "eco":
                     self.coordinator.eco_temp = temperature
-                elif self._get_active_mode() == "boost":
-                    self.coordinator.boost_temp = temperature
                 else:
                     self.coordinator.comfort_temp = temperature
             
@@ -223,11 +221,11 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
                 self.coordinator.force_eco_mode = False
                 _LOGGER.info("Climate: Set to COOL mode")
             else:  # AUTO mode
-                # Auto heating mode with schedule
+                # Auto heating mode (Comfort)
                 self.coordinator.current_hvac_mode = "heat"
                 self.coordinator.override_mode = False
                 self.coordinator.force_eco_mode = False
-                _LOGGER.info("Climate: Set to AUTO mode (heating with schedule)")
+                _LOGGER.info("Climate: Set to AUTO mode (heating with comfort default)")
                 
         await self.coordinator.async_update()
 

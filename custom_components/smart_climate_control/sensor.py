@@ -25,7 +25,7 @@ async def async_setup_entry(
         SmartClimateStatusSensor(coordinator, config_entry),
         SmartClimateModeSensor(coordinator, config_entry),
         SmartClimateTargetSensor(coordinator, config_entry),
-        # Removed SmartClimateControlledEntitySensor - not providing useful info
+        SmartClimateVentStatusSensor(coordinator, config_entry), # NEW
     ]
     
     async_add_entities(entities)
@@ -50,7 +50,7 @@ class SmartClimateBaseSensor(SensorEntity):
 
     @property
     def available(self):
-        """Sensors are always available - we want to show state even when disabled."""
+        """Sensors are always available."""
         return True
 
 
@@ -58,23 +58,18 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
     """Status sensor showing current smart control logic."""
 
     def __init__(self, coordinator, config_entry):
-        """Initialize the status sensor."""
         super().__init__(coordinator, config_entry, "status", "Status")
         self._attr_icon = "mdi:information-outline"
 
     @property
     def state(self):
-        """Return the state of the sensor."""
         if not self.coordinator.smart_control_enabled:
             return "Smart control disabled"
         return self.coordinator.debug_text
 
     @property
     def extra_state_attributes(self):
-        """Return extra attributes including deadband settings."""
         heat_pump_state = self.coordinator.current_heat_pump_state
-        
-        # Check if temperating mode is active based on debug text
         is_temperating = "Temperating" in self.coordinator.debug_text
         
         return {
@@ -83,18 +78,8 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "heat_pump_mode": heat_pump_state.get("hvac_mode"),
             "heat_pump_action": heat_pump_state.get("hvac_action"),
             "heat_pump_temperature": heat_pump_state.get("temperature"),
-            "heat_pump_current_temp": heat_pump_state.get("current_temperature"),
-            # ADD DEADBAND ATTRIBUTES HERE:
-            "deadband_below": self.coordinator.deadband_below,
-            "deadband_above": self.coordinator.deadband_above,
-            "max_house_temp": self.coordinator.max_house_temp,
-            "weather_comp_factor": self.coordinator.weather_comp_factor,
-            "max_comp_temp": self.coordinator.max_comp_temp,
-            "min_comp_temp": self.coordinator.min_comp_temp,
-            # Ezek a fontosak a temperáláshoz:
             "comfort_offset_applied": self.coordinator.comfort_offset_applied,
             "min_runtime_remaining_minutes": self.coordinator.min_runtime_remaining_minutes,
-            # ÚJ attribútum: Igaz, ha a rendszer épp temperál (folyamatos üzem hidegben)
             "is_temperating": is_temperating,
         }
 
@@ -103,13 +88,11 @@ class SmartClimateModeSensor(SmartClimateBaseSensor):
     """Mode sensor showing what mode smart control is using."""
     
     def __init__(self, coordinator, config_entry):
-        """Initialize the mode sensor."""
         super().__init__(coordinator, config_entry, "mode", "Mode")
         self._attr_icon = "mdi:home-thermometer"
     
     @property
     def state(self):
-        """Return the current smart control mode."""
         if not self.coordinator.smart_control_enabled:
             return "Disabled"
             
@@ -118,25 +101,21 @@ class SmartClimateModeSensor(SmartClimateBaseSensor):
         elif self.coordinator.override_mode:
             return "Force Comfort"
         else:
-            mode = self.coordinator.schedule_mode
-            return mode.capitalize() if mode else "Unknown"
+            return "Comfort"
 
     @property
     def extra_state_attributes(self):
-        """Return mode details."""
         return {
             "smart_control_enabled": self.coordinator.smart_control_enabled,
             "force_comfort": self.coordinator.override_mode,
             "force_eco": self.coordinator.force_eco_mode,
             "sleep_active": self.coordinator.sleep_mode_active,
-            "schedule_mode": self.coordinator.schedule_mode,
         }
 
 class SmartClimateTargetSensor(SmartClimateBaseSensor):
     """Target temperature sensor showing what smart control is targeting."""
 
     def __init__(self, coordinator, config_entry):
-        """Initialize the target sensor."""
         super().__init__(coordinator, config_entry, "target_temp", "Target")
         self._attr_icon = "mdi:thermometer-plus"
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
@@ -144,29 +123,48 @@ class SmartClimateTargetSensor(SmartClimateBaseSensor):
 
     @property
     def state(self):
-        """Return the target temperature that smart control would use."""
-        # Always return what the target would be, even if disabled
         base_temp = self.coordinator._determine_base_temperature()
         return base_temp
 
     @property
     def extra_state_attributes(self):
-        """Return temperature details."""
         return {
-            "smart_control_enabled": self.coordinator.smart_control_enabled,
             "comfort_temp": self.coordinator.comfort_temp,
             "eco_temp": self.coordinator.eco_temp,
             "boost_temp": self.coordinator.boost_temp,
-            "active_mode": self._get_active_mode(),
         }
-    
-    def _get_active_mode(self) -> str:
-        """Get the active temperature mode."""
-        if not self.coordinator.smart_control_enabled:
-            return "disabled"
-        elif self.coordinator.override_mode:
-            return "force_comfort"
-        elif self.coordinator.force_eco_mode or self.coordinator.sleep_mode_active:
-            return "force_eco" if self.coordinator.force_eco_mode else "sleep_eco"
-        else:
-            return self.coordinator.schedule_mode
+
+class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
+    """Ventilation Status sensor."""
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "vent_status", "Ventilation Status")
+        self._attr_icon = "mdi:fan-clock"
+
+    @property
+    def state(self):
+        if not self.coordinator.vent_enabled:
+            return "Disabled"
+        if self.coordinator.vent_is_running:
+            return f"Running ({self.coordinator.vent_reason})"
+        return "Idle"
+
+    @property
+    def extra_state_attributes(self):
+        """Return ventilation details."""
+        phase_text = "OFF"
+        if self.coordinator.vent_current_phase == 1:
+            phase_text = "Phase 1 (A OUT / B IN)"
+        elif self.coordinator.vent_current_phase == 2:
+            phase_text = "Phase 2 (A IN / B OUT)"
+            
+        return {
+            "is_running": self.coordinator.vent_is_running,
+            "reason": self.coordinator.vent_reason,
+            "current_phase_id": self.coordinator.vent_current_phase,
+            "current_phase_desc": phase_text,
+            "cycle_time": self.coordinator.vent_cycle_time,
+            "run_duration": self.coordinator.vent_run_duration,
+            "auto_interval_hours": self.coordinator.vent_auto_interval,
+            "humidity_threshold": self.coordinator.humidity_threshold,
+        }

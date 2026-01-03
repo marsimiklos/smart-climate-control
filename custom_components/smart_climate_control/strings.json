@@ -13,8 +13,7 @@
           "door_sensor": "Door Sensor (Legacy - Single)",
           "window_sensors": "Window/Door Sensors (Multiple - Recommended)",
           "heat_pump_contact": "Heat Pump Contact Sensor (optional - recommended for IR/SmartIR devices)",
-          "presence_tracker": "Presence Tracker (optional)",
-          "schedule_entity": "Heating Schedule (optional)"
+          "presence_tracker": "Presence Tracker (optional)"
         }
       },
       "options": {
@@ -29,6 +28,21 @@
           "weather_comp_factor": "Weather Compensation Factor",
           "window_sensors": "Window/Door Sensors",
           "window_delay": "Window Open Delay (minutes)"
+        }
+      },
+      "ventilation": {
+        "title": "Ventilation Settings (HRV)",
+        "description": "Configure heat recovery ventilation logic. Group A and B will alternate directions.",
+        "data": {
+          "fan_group_a": "Fan Group A (Entities)",
+          "fan_group_b": "Fan Group B (Entities)",
+          "humidity_sensor_a": "Humidity Sensor Group A",
+          "humidity_sensor_b": "Humidity Sensor Group B",
+          "vent_cycle_time": "Cycle Time (seconds - e.g. 75)",
+          "vent_duration": "Standard Run Duration (minutes)",
+          "vent_max_duration": "Max Safety Duration (minutes)",
+          "humidity_threshold": "Humidity Start Threshold (%)",
+          "vent_auto_interval": "Auto Start Interval (hours)"
         }
       },
 	  "beds": {
@@ -64,6 +78,20 @@
           "min_comp_temp": "Min Compensated Temperature (°C)",
           "window_sensors": "Window/Door Sensors",
           "window_delay": "Window Open Delay (minutes)"
+        }
+      },
+      "ventilation_options": {
+        "title": "Ventilation Options",
+        "data": {
+          "vent_cycle_time": "Cycle Time (seconds)",
+          "vent_duration": "Standard Run Duration (minutes)",
+          "vent_max_duration": "Max Safety Duration (minutes)",
+          "humidity_threshold": "Humidity Start Threshold (%)",
+          "vent_auto_interval": "Auto Start Interval (hours)",
+          "fan_group_a": "Fan Group A",
+          "fan_group_b": "Fan Group B",
+          "humidity_sensor_a": "Humidity Sensor A",
+          "humidity_sensor_b": "Humidity Sensor B"
         }
       }
     }
