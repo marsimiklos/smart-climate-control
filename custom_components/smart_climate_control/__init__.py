@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from datetime import timedelta, datetime
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Union
 import time
 
 import voluptuous as vol
@@ -393,27 +393,43 @@ class SmartClimateCoordinator:
         if self.vent_is_running:
             await self._manage_ventilation_cycle()
 
+    async def _get_max_humidity(self, sensor_conf: Union[str, List[str], None]) -> float:
+        """Get the maximum humidity from a sensor or list of sensors."""
+        if not sensor_conf:
+            return 0.0
+        
+        sensors = sensor_conf
+        if isinstance(sensors, str):
+            sensors = [sensors]
+            
+        max_hum = 0.0
+        for sensor_id in sensors:
+            val = await self._get_sensor_value(sensor_id)
+            if val is not None and val > max_hum:
+                max_hum = val
+        return max_hum
+
     async def _check_ventilation_triggers(self):
         """Check if we should start ventilation."""
         
         # A. Manual trigger is handled by switch/service directly
         
-        # B. Humidity Trigger
-        hum_a = await self._get_sensor_value(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
-        hum_b = await self._get_sensor_value(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+        # B. Humidity Trigger (Modified to handle multiple sensors)
+        hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
+        hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
         
         max_hum = 0
         target_phase = 1 # Default start phase (A OUT, B IN)
         
-        if hum_a and hum_a > self.humidity_threshold:
+        if hum_a > self.humidity_threshold:
             max_hum = max(max_hum, hum_a)
             # If A is humid, start by exhausting A (Phase 1: A OUT)
             target_phase = 1 
             
-        if hum_b and hum_b > self.humidity_threshold:
+        if hum_b > self.humidity_threshold:
             max_hum = max(max_hum, hum_b)
             # If B is humid, start by exhausting B (Phase 2: A IN => B OUT)
-            if hum_b > (hum_a or 0):
+            if hum_b > hum_a:
                 target_phase = 2
         
         if max_hum > self.humidity_threshold:
@@ -465,6 +481,7 @@ class SmartClimateCoordinator:
         self.vent_current_phase = 0
         
         # Turn off all fans
+        # Ensure we handle list of fans correctly (config stores list usually)
         await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_A, []))
         await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_B, []))
 
@@ -481,9 +498,9 @@ class SmartClimateCoordinator:
         
         # Check humidity stop condition if triggered by humidity
         if "Humidity" in self.vent_reason:
-            hum_a = await self._get_sensor_value(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
-            hum_b = await self._get_sensor_value(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
-            current_max = max(hum_a or 0, hum_b or 0)
+            hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
+            hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+            current_max = max(hum_a, hum_b)
             # If humidity drops below threshold - 5% hysteresis
             if current_max < (self.humidity_threshold - 5):
                  await self.stop_ventilation("Humidity normalized")
@@ -527,6 +544,10 @@ class SmartClimateCoordinator:
         """Turn on fans and set direction."""
         if not fan_list: return
         
+        # Ensure fan_list is a list (handle single entity case)
+        if isinstance(fan_list, str):
+            fan_list = [fan_list]
+            
         for fan in fan_list:
             try:
                 # 1. Turn ON if not on
@@ -549,6 +570,10 @@ class SmartClimateCoordinator:
     async def _turn_off_fans(self, fan_list):
         """Turn off fans."""
         if not fan_list: return
+        
+        if isinstance(fan_list, str):
+            fan_list = [fan_list]
+            
         for fan in fan_list:
             try:
                 await self.hass.services.async_call(
@@ -585,6 +610,7 @@ class SmartClimateCoordinator:
             if self.current_hvac_mode == "heat":
                 avg_house_temp = await self._get_sensor_value(self.config.get(CONF_AVERAGE_SENSOR))
                 await self._check_sleep_status()
+                # Schedule logic removed
                 base_temp = self._determine_base_temperature()
                 
                 action, temperature, reason = await self._calculate_heating_control(
@@ -742,7 +768,7 @@ class SmartClimateCoordinator:
         if self.force_comfort_mode: return self.comfort_temp
         elif self.force_eco_mode or self.sleep_mode_active: return self.eco_temp
         elif self.override_mode: return self.comfort_temp
-        # Schedule mode logic removed
+        # Schedule mode removed
         return self.comfort_temp
     
     async def _calculate_heating_control(
@@ -757,7 +783,7 @@ class SmartClimateCoordinator:
         if self.override_mode: return "on", base_temp, "Manual override"
         someone_home = await self._check_presence_status()
         if not someone_home: return "off", base_temp, "Nobody home"
-        # Removed schedule "off" check
+        # Schedule off removed
         if avg_house_temp is not None:
             if self.last_avg_house_over_limit:
                 if avg_house_temp > (self.max_house_temp - 0.5): return "off", base_temp, "House temp limit"
