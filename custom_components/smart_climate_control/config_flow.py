@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Union
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -43,7 +43,7 @@ from .const import (
     CONF_VENT_MAX_DURATION,
     CONF_HUMIDITY_THRESHOLD,
     CONF_VENT_AUTO_INTERVAL,
-    CONF_VENT_FAN_SPEED, # ÚJ
+    CONF_VENT_FAN_SPEED,
     DEFAULT_COMFORT_TEMP,
     DEFAULT_ECO_TEMP,
     DEFAULT_BOOST_TEMP,
@@ -62,7 +62,7 @@ from .const import (
     DEFAULT_VENT_MAX_DURATION,
     DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL,
-    DEFAULT_VENT_FAN_SPEED, # ÚJ
+    DEFAULT_VENT_FAN_SPEED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -239,7 +239,6 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_VENT_AUTO_INTERVAL, default=DEFAULT_VENT_AUTO_INTERVAL): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=48, step=1, mode="slider", unit_of_measurement="hours")
                 ),
-                # ÚJ: Ventilátor sebesség beállítás
                 vol.Optional(CONF_VENT_FAN_SPEED, default=DEFAULT_VENT_FAN_SPEED): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%")
                 ),
@@ -289,70 +288,82 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
             self._options.update(user_input)
             return await self.async_step_ventilation_options()
 
-        # Get defaults from options or fallback to data
+        # Robusztus segédfüggvények a beállítások betöltéséhez
         def get_opt(key, default):
-            return self._config_entry.options.get(key, default)
+            # Először megnézzük az options-ben (ha már mentve volt)
+            if key in self._config_entry.options:
+                return self._config_entry.options[key]
+            # Ha nincs, akkor a data-ban (eredeti config)
+            return self._config_entry.data.get(key, default)
+
+        def get_list_opt(key):
+            val = get_opt(key, [])
+            if isinstance(val, str):
+                return [val]
+            if val is None:
+                return []
+            return val
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
                 vol.Optional(
                     CONF_COMFORT_TEMP,
-                    default=self._config_entry.options.get(CONF_COMFORT_TEMP, DEFAULT_COMFORT_TEMP)
+                    default=get_opt(CONF_COMFORT_TEMP, DEFAULT_COMFORT_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=16, max=25, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_ECO_TEMP,
-                    default=self._config_entry.options.get(CONF_ECO_TEMP, DEFAULT_ECO_TEMP)
+                    default=get_opt(CONF_ECO_TEMP, DEFAULT_ECO_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=16, max=25, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_BOOST_TEMP,
-                    default=self._config_entry.options.get(CONF_BOOST_TEMP, DEFAULT_BOOST_TEMP)
+                    default=get_opt(CONF_BOOST_TEMP, DEFAULT_BOOST_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=16, max=25, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_DEADBAND_BELOW,
-                    default=self._config_entry.options.get(CONF_DEADBAND_BELOW, DEFAULT_DEADBAND)
+                    default=get_opt(CONF_DEADBAND_BELOW, DEFAULT_DEADBAND)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0.1, max=2, step=0.1, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_DEADBAND_ABOVE,
-                    default=self._config_entry.options.get(CONF_DEADBAND_ABOVE, DEFAULT_DEADBAND)
+                    default=get_opt(CONF_DEADBAND_ABOVE, DEFAULT_DEADBAND)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0.1, max=2, step=0.1, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_MAX_HOUSE_TEMP,
-                    default=self._config_entry.options.get(CONF_MAX_HOUSE_TEMP, DEFAULT_MAX_HOUSE_TEMP)
+                    default=get_opt(CONF_MAX_HOUSE_TEMP, DEFAULT_MAX_HOUSE_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_WEATHER_COMP_FACTOR,
-                    default=self._config_entry.options.get(CONF_WEATHER_COMP_FACTOR, DEFAULT_WEATHER_COMP_FACTOR)
+                    default=get_opt(CONF_WEATHER_COMP_FACTOR, DEFAULT_WEATHER_COMP_FACTOR)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=1, step=0.1, mode="slider")
                 ),
                 vol.Optional(
                     CONF_MAX_COMP_TEMP,
-                    default=self._config_entry.options.get(CONF_MAX_COMP_TEMP, DEFAULT_MAX_COMP_TEMP)
+                    default=get_opt(CONF_MAX_COMP_TEMP, DEFAULT_MAX_COMP_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_MIN_COMP_TEMP,
-                    default=self._config_entry.options.get(CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP)
+                    default=get_opt(CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=14, max=20, step=0.5, mode="slider", unit_of_measurement="°C")
                 ),
                 vol.Optional(
                     CONF_COMFORT_OFFSET,
-                    default=self._config_entry.options.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
+                    default=get_opt(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=0, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
@@ -360,7 +371,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_MIN_RUN_TIME,
-                    default=self._config_entry.options.get(CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME)
+                    default=get_opt(CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=10, max=120, step=5, mode="slider", unit_of_measurement="min"
@@ -368,7 +379,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_LOW_TEMP_THRESHOLD,
-                    default=self._config_entry.options.get(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
+                    default=get_opt(CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=-20, max=15, step=0.5, mode="slider", unit_of_measurement="°C"
@@ -376,7 +387,7 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_SAFETY_CUTOFF,
-                    default=self._config_entry.options.get(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
+                    default=get_opt(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=0.5, max=5, step=0.5, mode="slider", unit_of_measurement="°C"
@@ -384,15 +395,16 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_WINDOW_DELAY,
-                    default=self._config_entry.options.get(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
+                    default=get_opt(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                      min=0, max=30, step=0.5, mode="slider", unit_of_measurement="min"
                     )
                 ),
+                # ITT JAVÍTVA: A window sensors most már get_list_opt-ot használ a helyes betöltéshez
                 vol.Optional(
                     CONF_WINDOW_SENSORS,
-                    default=self._config_entry.options.get(CONF_WINDOW_SENSORS) or self._config_entry.data.get(CONF_WINDOW_SENSORS, [])
+                    default=get_list_opt(CONF_WINDOW_SENSORS)
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["binary_sensor", "input_boolean"],
@@ -408,15 +420,18 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
             self._options.update(user_input)
             return self.async_create_entry(title="", data=self._options)
 
-        # Get defaults from options or fallback to data
+        # Robusztus segédfüggvények (ugyanaz, mint az init lépésben)
         def get_opt(key, default):
-            return self._config_entry.options.get(key) or self._config_entry.data.get(key, default)
+            if key in self._config_entry.options:
+                return self._config_entry.options[key]
+            return self._config_entry.data.get(key, default)
 
-        # Segédfüggvény a default érték normalizálásához
         def get_list_opt(key):
             val = get_opt(key, [])
             if isinstance(val, str):
                 return [val]
+            if val is None:
+                return []
             return val
 
         return self.async_show_form(
@@ -467,7 +482,6 @@ class SmartClimateOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True)
                 ),
-                # ÚJ: Ventilátor sebesség beállítás
                 vol.Optional(
                     CONF_VENT_FAN_SPEED, default=get_opt(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
                 ): selector.NumberSelector(
