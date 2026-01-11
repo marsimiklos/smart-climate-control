@@ -73,11 +73,17 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
         heat_pump_state = self.coordinator.current_heat_pump_state
         is_temperating = "Temperating" in self.coordinator.debug_text
         
-        # Calculate window timer
+        # Calculate window timer (Open or Cooldown)
+        import time
         window_timer_min = 0
+        window_mode_desc = "None"
+        
         if self.coordinator.window_open_start is not None:
-            import time
             window_timer_min = round((time.time() - self.coordinator.window_open_start) / 60, 1)
+            window_mode_desc = "Open Timer"
+        elif self.coordinator.window_cooldown_start is not None:
+            window_timer_min = round((time.time() - self.coordinator.window_cooldown_start) / 60, 1)
+            window_mode_desc = "Cooldown (Restore)"
 
         return {
             # --- General System State ---
@@ -108,8 +114,11 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             
             # --- Window Logic ---
             "window_open_active": self.coordinator.window_open_start is not None,
-            "window_open_duration_min": window_timer_min,
+            "window_cooldown_active": self.coordinator.window_cooldown_start is not None,
+            "window_timer_mode": window_mode_desc,
+            "window_timer_min": window_timer_min,
             "window_delay_setting": self.coordinator.window_delay_minutes,
+            "open_windows": self.coordinator.open_window_details, # New List of Open Windows
         }
 
 
