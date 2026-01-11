@@ -672,7 +672,9 @@ class SmartClimateCoordinator:
                 )
             
             self.current_action = action
-            await self._control_heat_pump_directly(action, temperature, self.current_hvac_mode)
+            # MÓDOSÍTÁS: A window_open_stop_heating értéket átadjuk bypass_protection-ként
+            # Így ha ablak miatt kell leállni, nem számít a minimum működési idő.
+            await self._control_heat_pump_directly(action, temperature, self.current_hvac_mode, bypass_protection=window_open_stop_heating)
             await self._verify_heat_pump_with_contact_sensor()
             
             self.hass.bus.async_fire(f"{DOMAIN}_state_updated", {
@@ -897,11 +899,13 @@ class SmartClimateCoordinator:
         elif room_temp <= turn_off_temp: return "off", base_temp, f"Too cold ({room_temp:.1f}°C <= {turn_off_temp:.1f}°C)"
         else: return self.current_action, base_temp, "In deadband"
     
-    async def _control_heat_pump_directly(self, action: str, temperature: Optional[float], hvac_mode: str) -> None:
+    async def _control_heat_pump_directly(self, action: str, temperature: Optional[float], hvac_mode: str, bypass_protection: bool = False) -> None:
         """Control the heat pump entity directly with minimum runtime enforcement."""
         now = time.time()
     
-        if action == "off" and self.last_heat_pump_start is not None:
+        # Ellenőrizzük, ha kikapcsolásra készül, hogy a minimum futásidő letelt-e
+        # MÓDOSÍTÁS: Csak akkor blokkoljuk a leállást, ha NINCS bypass (azaz nem vészleállás/ablaknyitás)
+        if action == "off" and self.last_heat_pump_start is not None and not bypass_protection:
             runtime = now - self.last_heat_pump_start
             if runtime < self.min_runtime:
                 _LOGGER.info(f"Minimum runtime not reached ({runtime:.0f}s < {self.min_runtime}s), keeping heat pump on.")
