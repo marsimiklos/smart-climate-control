@@ -712,6 +712,8 @@ class SmartClimateCoordinator:
         open_sensors_ids = []
         open_sensors_names = []
         
+        configured_delay = self.window_delay_minutes
+        
         # 1. Collect all window sensors
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         # Ensure it is a list
@@ -758,7 +760,6 @@ class SmartClimateCoordinator:
                 return False # Allow delay time before acting
             else:
                 elapsed_minutes = (now - self.window_open_start) / 60
-                configured_delay = self.window_delay_minutes
                 
                 if elapsed_minutes > configured_delay:
                     return True # Stop Heating/Cooling
@@ -770,14 +771,26 @@ class SmartClimateCoordinator:
             # If we were previously in "Window Open" mode (timer active)
             if self.window_open_start is not None:
                 
+                # Check if we ACTUALLY reached the limit where we stopped the heat.
+                # If we closed the window BEFORE the delay passed, we should NOT enter cooldown,
+                # just reset everything.
+                elapsed_since_open = (now - self.window_open_start) / 60
+                
+                if elapsed_since_open < configured_delay:
+                    # We closed it before the timer triggered a stop.
+                    # Just reset.
+                    _LOGGER.info(f"Window closed before delay ({elapsed_since_open:.1f}m < {configured_delay}m). Resetting timer, no cooldown.")
+                    self.window_open_start = None
+                    self.window_cooldown_start = None
+                    return False
+
                 # If we haven't started cooldown yet, start it now
                 if self.window_cooldown_start is None:
                     self.window_cooldown_start = now
-                    _LOGGER.info("All windows closed. Starting restore cooldown.")
+                    _LOGGER.info("All windows closed after being open > delay. Starting restore cooldown.")
                 
                 # Check cooldown duration
                 cooldown_elapsed = (now - self.window_cooldown_start) / 60
-                configured_delay = self.window_delay_minutes
                 
                 if cooldown_elapsed < configured_delay:
                     # Still cooling down / waiting to restore
