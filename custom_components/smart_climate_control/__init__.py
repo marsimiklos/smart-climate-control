@@ -561,6 +561,12 @@ class SmartClimateCoordinator:
             hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
             hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
             current_max = max(hum_a, hum_b)
+            
+            # --- FIX: Update reason text dynamically to show current humidity ---
+            if "Merge" not in self.vent_reason:
+                self.vent_reason = f"High Humidity ({current_max:.1f}%)"
+            # ------------------------------------------------------------------
+
             # If humidity drops below threshold - 5% hysteresis
             if current_max < (self.humidity_threshold - 5):
                  await self.stop_ventilation("Humidity normalized")
