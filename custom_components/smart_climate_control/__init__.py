@@ -281,6 +281,8 @@ class SmartClimateCoordinator:
         self.humidity_threshold = self._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
         self.vent_cycle_time = self._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
         self.vent_fan_speed = self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
+        self.vent_humidity_cooldown_end = 0 
+        self.last_vent_safety_check = 0 # Track last safety turn-off time
         
         self.entry.add_update_listener(self.async_options_updated)
     
@@ -433,6 +435,15 @@ class SmartClimateCoordinator:
             return
 
         if not self.vent_is_running:
+            # SAFETY CHECK: Ensure fans are off if system thinks they should be off
+            # Checks every 60 seconds
+            now_ts = time.time()
+            if self.last_vent_safety_check is None or (now_ts - self.last_vent_safety_check) > 60:
+                 self.last_vent_safety_check = now_ts
+                 # Force turn off fan groups just in case
+                 await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_A, []))
+                 await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_B, []))
+
             await self._check_ventilation_triggers()
         
         if self.vent_is_running:
@@ -454,26 +465,35 @@ class SmartClimateCoordinator:
         return max_hum
 
     async def _check_ventilation_triggers(self):
-        hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
-        hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+        """Check if we should start ventilation."""
         
-        max_hum = 0
-        target_phase = 1 
-        
-        if hum_a > self.humidity_threshold:
-            max_hum = max(max_hum, hum_a)
+        # B. Humidity Trigger (Modified with Cooldown check)
+        # Only check humidity if not in cooldown period
+        if time.time() > self.vent_humidity_cooldown_end:
+            hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
+            hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+            
+            max_hum = 0
             target_phase = 1 
             
-        if hum_b > self.humidity_threshold:
-            max_hum = max(max_hum, hum_b)
-            if hum_b > hum_a:
-                target_phase = 2
-        
-        if max_hum > self.humidity_threshold:
-            self.vent_run_duration = self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
-            await self.start_ventilation_cycle(f"High Humidity ({max_hum:.1f}%)", start_phase=target_phase)
-            return
+            if hum_a > self.humidity_threshold:
+                max_hum = max(max_hum, hum_a)
+                target_phase = 1 
+                
+            if hum_b > self.humidity_threshold:
+                max_hum = max(max_hum, hum_b)
+                if hum_b > hum_a:
+                    target_phase = 2
+            
+            if max_hum > self.humidity_threshold:
+                self.vent_run_duration = self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
+                await self.start_ventilation_cycle(f"High Humidity ({max_hum:.1f}%)", start_phase=target_phase)
+                return
+        else:
+             # Just for debug/trace if needed, we skip humidity check due to cooldown
+             pass
 
+        # C. Auto Schedule Trigger
         if self.vent_auto_interval > 0:
             now_ts = time.time()
             if self.last_vent_auto_run is None:
@@ -516,23 +536,48 @@ class SmartClimateCoordinator:
         await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_B, []))
 
     async def _manage_ventilation_cycle(self):
+        """Manage direction switching and max duration."""
         now = time.time()
+        
+        # 0. UPGRADE CHECK: If running Scheduled/Other but humidity rises, switch mode!
+        # This prevents "clashing" where scheduled run ignores humidity.
+        if "Humidity" not in self.vent_reason and not self.vent_manual_mode:
+             hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
+             hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+             current_max = max(hum_a, hum_b)
+             
+             if current_max > self.humidity_threshold:
+                  _LOGGER.info(f"High humidity ({current_max}%) detected during '{self.vent_reason}'. Switching to Humidity Mode.")
+                  self.vent_reason = f"Humidity (Merge: {self.vent_reason})"
+                  # Now it will be subject to Humidity Stop Logic (Hysteresis)
+
+        # 1. Check Duration Limits
         max_duration_min = self._get_config_value(CONF_VENT_MAX_DURATION, DEFAULT_VENT_MAX_DURATION)
         limit_min = min(self.vent_run_duration, max_duration_min)
         run_time_min = (now - self.vent_start_time) / 60
         
+        # 2. Humidity Stop Logic (Hysteresis)
         if "Humidity" in self.vent_reason:
             hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
             hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
             current_max = max(hum_a, hum_b)
+            # If humidity drops below threshold - 5% hysteresis
             if current_max < (self.humidity_threshold - 5):
                  await self.stop_ventilation("Humidity normalized")
                  return
 
+        # 3. Timeout Logic with Cooldown
         if run_time_min >= limit_min and not self.vent_manual_mode:
+            # If we timed out while trying to clear Humidity, we need a cooldown
+            # to prevent infinite loops if it's raining outside.
+            if "Humidity" in self.vent_reason:
+                self.vent_humidity_cooldown_end = now + (15 * 60) # 15 minutes cooldown
+                _LOGGER.info("Humidity run timed out. Enforcing 15m cooldown before retry.")
+            
             await self.stop_ventilation(f"Duration reached ({limit_min}m)")
             return
 
+        # 4. Phase Switching
         cycle_elapsed = now - self.vent_cycle_start_time
         if cycle_elapsed >= self.vent_cycle_time:
             self.vent_cycle_start_time = now
