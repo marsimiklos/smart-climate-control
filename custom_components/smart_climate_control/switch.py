@@ -25,8 +25,9 @@ async def async_setup_entry(
         # Ventilation Switches
         SmartClimateVentEnableSwitch(coordinator, config_entry),   # Enable Vent Auto
         SmartClimateVentManualSwitch(coordinator, config_entry),   # Start Manual Vent
-        # Airout Switches
+        # Airout & Free Cooling Switches
         SmartClimateAiroutSwitch(coordinator, config_entry),       # Kiszellőztetés kapcsoló
+        SmartClimateFreeCoolingSwitch(coordinator, config_entry),  # Automata Szabadhűtés kapcsoló
     ]
     
     async_add_entities(entities)
@@ -230,7 +231,7 @@ class SmartClimateVentManualSwitch(SmartClimateBaseSwitch):
         await self.coordinator.stop_ventilation("Manual Switch Off")
 
 
-# --- AIROUT (Kiszellőztetés) SWITCH ---
+# --- AIROUT & FREE COOLING SWITCHES ---
 class SmartClimateAiroutSwitch(SmartClimateBaseSwitch):
     """Manual run switch for single-direction ventilation (Airout)."""
 
@@ -240,7 +241,7 @@ class SmartClimateAiroutSwitch(SmartClimateBaseSwitch):
 
     @property
     def is_on(self):
-        return self.coordinator.airout_is_running
+        return self.coordinator.airout_is_running and self.coordinator.vent_reason != "Free Cooling"
 
     @property
     def extra_state_attributes(self):
@@ -250,9 +251,37 @@ class SmartClimateAiroutSwitch(SmartClimateBaseSwitch):
         }
 
     async def async_turn_on(self, **kwargs):
-        await self.coordinator.start_airout()
+        await self.coordinator.start_airout(reason="Manual Switch")
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
         await self.coordinator.stop_airout("Manual Switch Off")
+        self.async_write_ha_state()
+
+class SmartClimateFreeCoolingSwitch(SmartClimateBaseSwitch):
+    """Enable or disable automatic Free Cooling (Szabadhűtés)."""
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "free_cooling", "Auto Free Cooling")
+        self._attr_icon = "mdi:snowflake-thermometer"
+
+    @property
+    def is_on(self):
+        return self.coordinator.free_cooling_enabled
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "max_duration_mins": self.coordinator.free_cooling_max_duration,
+            "cooldown_hours": self.coordinator.free_cooling_cooldown,
+        }
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.free_cooling_enabled = True
+        await self.coordinator.async_save_state()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.free_cooling_enabled = False
+        await self.coordinator.async_save_state()
         self.async_write_ha_state()
