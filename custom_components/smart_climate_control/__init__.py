@@ -76,11 +76,14 @@ from .const import (
     DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL,
     DEFAULT_VENT_FAN_SPEED,
+    # Airout
+    CONF_AIROUT_DURATION,
+    DEFAULT_AIROUT_DURATION
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.NUMBER, Platform.SWITCH, Platform.SENSOR]
+PLATFORMS = [Platform.NUMBER, Platform.SWITCH, Platform.SENSOR, Platform.SELECT]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Climate Control from a config entry."""
@@ -174,6 +177,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
         await coordinator._release_control()
         await coordinator.stop_ventilation(reason="Unload")
+        await coordinator.stop_airout(reason="Unload") 
         if coordinator.window_listener_remove:
             coordinator.window_listener_remove()
         hass.data[DOMAIN].pop(entry.entry_id)
@@ -184,7 +188,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for Smart Climate Control."""
     
     async def handle_force_eco(call: ServiceCall) -> None:
-        """Handle force eco mode service."""
         for entry_id in hass.data[DOMAIN]:
             coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
             coordinator.force_eco_mode = call.data.get("enable", True)
@@ -193,7 +196,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.async_update()
     
     async def handle_force_comfort(call: ServiceCall) -> None:
-        """Handle force comfort mode service."""
         for entry_id in hass.data[DOMAIN]:
             coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
             coordinator.force_comfort_mode = call.data.get("enable", True)
@@ -202,13 +204,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.async_update()
     
     async def handle_reset_temperatures(call: ServiceCall) -> None:
-        """Handle temperature reset service."""
         for entry_id in hass.data[DOMAIN]:
             coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
             await coordinator.reset_temperatures()
             
     async def handle_trigger_ventilation(call: ServiceCall) -> None:
-        """Manually trigger ventilation cycle."""
         duration = call.data.get("duration")
         for entry_id in hass.data[DOMAIN]:
             coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
@@ -247,9 +247,9 @@ class SmartClimateCoordinator:
         
         # Window Logic Variables
         self.window_open_start = None
-        self.window_cooldown_start = None # Tracks time after closing window
-        self.open_window_details = [] # List of currently open window names
-        self.window_listener_remove = None # Cleanup function for listeners
+        self.window_cooldown_start = None
+        self.open_window_details = []
+        self.window_listener_remove = None
 
         self.comfort_offset_applied = 0.0
         self.min_runtime_remaining_minutes = 0
@@ -282,7 +282,20 @@ class SmartClimateCoordinator:
         self.vent_cycle_time = self._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
         self.vent_fan_speed = self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
         self.vent_humidity_cooldown_end = 0 
-        self.last_vent_safety_check = 0 # Track last safety turn-off time
+        self.last_vent_safety_check = 0 
+
+        # AIROUT (Kiszellőztetés) STATE
+        self.airout_is_running = False
+        self.airout_start_time = None
+        self.airout_direction = "forward"
+        self.airout_duration = self._get_config_value(CONF_AIROUT_DURATION, DEFAULT_AIROUT_DURATION)
+        self.current_airout_limit = self.airout_duration
+        
+        # FREE COOLING (Szabadhűtés) STATE
+        self.free_cooling_enabled = False 
+        self.free_cooling_max_duration = 60 # perc
+        self.free_cooling_cooldown = 3 # óra
+        self.last_free_cooling_run = 0 # mikor futott utoljára
         
         self.entry.add_update_listener(self.async_options_updated)
     
@@ -350,9 +363,11 @@ class SmartClimateCoordinator:
             coordinator.vent_cycle_time = coordinator._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
             coordinator.vent_fan_speed = coordinator._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
             
-            # Re-setup listeners in case window sensors changed
+            # Update free cooling settings
+            coordinator.free_cooling_max_duration = coordinator._get_config_value("free_cooling_max_duration", 60)
+            coordinator.free_cooling_cooldown = coordinator._get_config_value("free_cooling_cooldown", 3)
+
             await coordinator._setup_window_listeners()
-            
             await coordinator.async_update()
     
     async def async_save_state(self) -> None:
@@ -368,6 +383,14 @@ class SmartClimateCoordinator:
             "last_vent_auto_run": self.last_vent_auto_run,
             "vent_enabled": self.vent_enabled,
             "vent_fan_speed": self.vent_fan_speed,
+            # Airout persistence
+            "airout_direction": self.airout_direction,
+            "airout_duration": self.airout_duration,
+            # Free Cooling persistence
+            "free_cooling_enabled": self.free_cooling_enabled,
+            "last_free_cooling_run": self.last_free_cooling_run,
+            "free_cooling_max_duration": self.free_cooling_max_duration,
+            "free_cooling_cooldown": self.free_cooling_cooldown,
         })
 
     async def async_initialize(self) -> None:
@@ -385,20 +408,24 @@ class SmartClimateCoordinator:
             self.vent_enabled = stored_data.get("vent_enabled", True)
             self.vent_fan_speed = stored_data.get("vent_fan_speed", self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED))
             
-        # Setup instant listeners for windows
+            self.airout_direction = stored_data.get("airout_direction", "forward")
+            self.airout_duration = stored_data.get("airout_duration", self._get_config_value(CONF_AIROUT_DURATION, DEFAULT_AIROUT_DURATION))
+            
+            self.free_cooling_enabled = stored_data.get("free_cooling_enabled", False)
+            self.last_free_cooling_run = stored_data.get("last_free_cooling_run", 0)
+            self.free_cooling_max_duration = stored_data.get("free_cooling_max_duration", self._get_config_value("free_cooling_max_duration", 60))
+            self.free_cooling_cooldown = stored_data.get("free_cooling_cooldown", self._get_config_value("free_cooling_cooldown", 3))
+
         await self._setup_window_listeners()
-        
         _LOGGER.info(f"Smart Climate initialized. Vent enabled: {self.vent_enabled}")
 
     async def _setup_window_listeners(self):
         """Setup listeners for window/door sensors for immediate reaction."""
-        # Remove existing listener if present
         if self.window_listener_remove:
             self.window_listener_remove()
             self.window_listener_remove = None
 
         sensors = []
-        # Get sensors from options or config (as list)
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str):
             window_sensors = [window_sensors]
@@ -410,21 +437,84 @@ class SmartClimateCoordinator:
             sensors.append(door_sensor)
         
         if sensors:
-            _LOGGER.info(f"Setting up immediate listeners for window sensors: {sensors}")
             self.window_listener_remove = async_track_state_change_event(
                 self.hass, sensors, self._handle_window_state_change
             )
 
     @callback
     async def _handle_window_state_change(self, event: Event):
-        """Handle immediate update when a window sensor changes."""
-        entity_id = event.data.get("entity_id")
-        new_state = event.data.get("new_state")
-        _LOGGER.debug(f"Window sensor changed: {entity_id} -> {new_state.state if new_state else 'None'}. Triggering immediate update.")
         await self.async_update()
 
     # ========================================================================================
-    #                               VENTILATION LOGIC
+    #                               AIROUT LOGIC (Kiszellőztetés / Szabadhűtés)
+    # ========================================================================================
+    
+    async def _apply_airout_direction(self):
+        """Beállítja az összes ventilátort ugyanabba az irányba."""
+        fans_a = self._get_config_value(CONF_FAN_GROUP_A, [])
+        fans_b = self._get_config_value(CONF_FAN_GROUP_B, [])
+        
+        all_fans = []
+        if isinstance(fans_a, list): all_fans.extend(fans_a)
+        elif fans_a: all_fans.append(fans_a)
+        
+        if isinstance(fans_b, list): all_fans.extend(fans_b)
+        elif fans_b: all_fans.append(fans_b)
+
+        await self._set_fans(all_fans, self.airout_direction)
+
+    async def start_airout(self, reason: str = "Manual Switch", custom_duration: Optional[int] = None):
+        """Elindítja az egyirányú kiszellőztetést vagy szabadhűtést."""
+        if self.vent_is_running:
+            await self.stop_ventilation("Airout Override")
+            
+        self.airout_is_running = True
+        self.airout_start_time = time.time()
+        self.vent_reason = reason
+        self.current_airout_limit = custom_duration if custom_duration is not None else self.airout_duration
+        
+        await self._apply_airout_direction()
+        
+        _LOGGER.info(f"Airout started ({reason}) in {self.airout_direction} direction for max {self.current_airout_limit} mins")
+        self.hass.bus.async_fire(f"{DOMAIN}_airout_started", {"direction": self.airout_direction, "reason": reason})
+
+    async def stop_airout(self, reason: str):
+        """Leállítja a kiszellőztetést."""
+        self.airout_is_running = False
+        self.vent_reason = "Idle"
+        
+        fans_a = self._get_config_value(CONF_FAN_GROUP_A, [])
+        fans_b = self._get_config_value(CONF_FAN_GROUP_B, [])
+        all_fans = []
+        if isinstance(fans_a, list): all_fans.extend(fans_a)
+        elif fans_a: all_fans.append(fans_a)
+        if isinstance(fans_b, list): all_fans.extend(fans_b)
+        elif fans_b: all_fans.append(fans_b)
+        
+        await self._turn_off_fans(all_fans)
+        _LOGGER.info(f"Airout stopped: {reason}")
+
+    async def _manage_airout(self):
+        """Figyeli a kiszellőztetés idejét és leállítja, ha letelt, vagy ha elérte a célhőmérsékletet."""
+        now = time.time()
+        elapsed_min = (now - self.airout_start_time) / 60
+        limit = getattr(self, "current_airout_limit", self.airout_duration)
+        
+        # Leállítás ha lejárt az idő
+        if elapsed_min >= limit:
+            await self.stop_airout(f"Duration reached ({limit}m)")
+            return
+
+        # Ha ez Szabadhűtés, ellenőrizzük, hogy elértük-e a benti célhőmérsékletet
+        if self.vent_reason == "Free Cooling":
+            room_temp = await self._get_sensor_value(self.config.get(CONF_ROOM_SENSOR))
+            target_temp = self.cooling_temp if self.current_hvac_mode == "cool" else self._determine_base_temperature()
+            
+            if room_temp is not None and room_temp <= target_temp:
+                await self.stop_airout("Target temperature reached")
+
+    # ========================================================================================
+    #                               VENTILATION LOGIC (HRV)
     # ========================================================================================
     
     async def async_update_ventilation(self, now=None) -> None:
@@ -432,15 +522,19 @@ class SmartClimateCoordinator:
         if not self.vent_enabled:
             if self.vent_is_running:
                 await self.stop_ventilation("Ventilation Disabled")
+            if self.airout_is_running:
+                await self.stop_airout("Ventilation Disabled")
+            return
+
+        # Ha a Kiszellőztetés (Airout) vagy Szabadhűtés aktív, ne csináljuk a normál HRV logikát
+        if self.airout_is_running:
+            await self._manage_airout()
             return
 
         if not self.vent_is_running:
-            # SAFETY CHECK: Ensure fans are off if system thinks they should be off
-            # Checks every 60 seconds
             now_ts = time.time()
             if self.last_vent_safety_check is None or (now_ts - self.last_vent_safety_check) > 60:
                  self.last_vent_safety_check = now_ts
-                 # Force turn off fan groups just in case
                  await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_A, []))
                  await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_B, []))
 
@@ -465,10 +559,26 @@ class SmartClimateCoordinator:
         return max_hum
 
     async def _check_ventilation_triggers(self):
-        """Check if we should start ventilation."""
-        
-        # B. Humidity Trigger (Modified with Cooldown check)
-        # Only check humidity if not in cooldown period
+        # 1. Szabadhűtés (Free Cooling) ellenőrzése
+        if self.free_cooling_enabled and not self.airout_is_running:
+            now_ts = time.time()
+            cooldown_sec = self.free_cooling_cooldown * 3600
+            
+            # Megvizsgáljuk letelt-e a pihenőidő
+            if (now_ts - self.last_free_cooling_run) >= cooldown_sec:
+                room_temp = await self._get_sensor_value(self.config.get(CONF_ROOM_SENSOR))
+                outside_temp = await self._get_sensor_value(self.config.get(CONF_OUTSIDE_SENSOR))
+                target_temp = self.cooling_temp if self.current_hvac_mode == "cool" else self._determine_base_temperature()
+                
+                if room_temp is not None and outside_temp is not None:
+                    # Feltétel: Bent melegebb van a célnál, kint pedig hűvösebb, mint bent
+                    if room_temp > target_temp and outside_temp < room_temp:
+                        await self.start_airout(reason="Free Cooling", custom_duration=self.free_cooling_max_duration)
+                        self.last_free_cooling_run = now_ts
+                        await self.async_save_state()
+                        return
+
+        # 2. Páratartalom és Automata Indítás ellenőrzése
         if time.time() > self.vent_humidity_cooldown_end:
             hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
             hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
@@ -489,11 +599,7 @@ class SmartClimateCoordinator:
                 self.vent_run_duration = self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
                 await self.start_ventilation_cycle(f"High Humidity ({max_hum:.1f}%)", start_phase=target_phase)
                 return
-        else:
-             # Just for debug/trace if needed, we skip humidity check due to cooldown
-             pass
 
-        # C. Auto Schedule Trigger
         if self.vent_auto_interval > 0:
             now_ts = time.time()
             if self.last_vent_auto_run is None:
@@ -511,7 +617,6 @@ class SmartClimateCoordinator:
         if self.vent_is_running:
             return 
             
-        _LOGGER.info(f"Starting Ventilation: {reason}")
         self.vent_is_running = True
         self.vent_reason = reason
         self.vent_start_time = time.time()
@@ -526,7 +631,6 @@ class SmartClimateCoordinator:
         })
 
     async def stop_ventilation(self, reason: str):
-        _LOGGER.info(f"Stopping Ventilation: {reason}")
         self.vent_is_running = False
         self.vent_manual_mode = False
         self.vent_reason = "Idle"
@@ -536,54 +640,39 @@ class SmartClimateCoordinator:
         await self._turn_off_fans(self._get_config_value(CONF_FAN_GROUP_B, []))
 
     async def _manage_ventilation_cycle(self):
-        """Manage direction switching and max duration."""
         now = time.time()
         
-        # 0. UPGRADE CHECK: If running Scheduled/Other but humidity rises, switch mode!
-        # This prevents "clashing" where scheduled run ignores humidity.
         if "Humidity" not in self.vent_reason and not self.vent_manual_mode:
              hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
              hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
              current_max = max(hum_a, hum_b)
              
              if current_max > self.humidity_threshold:
-                  _LOGGER.info(f"High humidity ({current_max}%) detected during '{self.vent_reason}'. Switching to Humidity Mode.")
                   self.vent_reason = f"Humidity (Merge: {self.vent_reason})"
-                  # Now it will be subject to Humidity Stop Logic (Hysteresis)
 
-        # 1. Check Duration Limits
         max_duration_min = self._get_config_value(CONF_VENT_MAX_DURATION, DEFAULT_VENT_MAX_DURATION)
         limit_min = min(self.vent_run_duration, max_duration_min)
         run_time_min = (now - self.vent_start_time) / 60
         
-        # 2. Humidity Stop Logic (Hysteresis)
         if "Humidity" in self.vent_reason:
             hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
             hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
             current_max = max(hum_a, hum_b)
             
-            # --- FIX: Update reason text dynamically to show current humidity ---
             if "Merge" not in self.vent_reason:
                 self.vent_reason = f"High Humidity ({current_max:.1f}%)"
-            # ------------------------------------------------------------------
 
-            # If humidity drops below threshold - 5% hysteresis
             if current_max < (self.humidity_threshold - 5):
                  await self.stop_ventilation("Humidity normalized")
                  return
 
-        # 3. Timeout Logic with Cooldown
         if run_time_min >= limit_min and not self.vent_manual_mode:
-            # If we timed out while trying to clear Humidity, we need a cooldown
-            # to prevent infinite loops if it's raining outside.
             if "Humidity" in self.vent_reason:
-                self.vent_humidity_cooldown_end = now + (15 * 60) # 15 minutes cooldown
-                _LOGGER.info("Humidity run timed out. Enforcing 15m cooldown before retry.")
+                self.vent_humidity_cooldown_end = now + (15 * 60)
             
             await self.stop_ventilation(f"Duration reached ({limit_min}m)")
             return
 
-        # 4. Phase Switching
         cycle_elapsed = now - self.vent_cycle_start_time
         if cycle_elapsed >= self.vent_cycle_time:
             self.vent_cycle_start_time = now
@@ -592,7 +681,6 @@ class SmartClimateCoordinator:
             else:
                 self.vent_current_phase = 1
             
-            _LOGGER.debug(f"Ventilation switching to Phase {self.vent_current_phase}")
             await self._apply_fan_directions(self.vent_current_phase)
 
     async def _apply_fan_directions(self, phase: int):
@@ -639,7 +727,6 @@ class SmartClimateCoordinator:
     # ========================================================================================
 
     async def async_update(self, now=None) -> None:
-        """Update climate control logic."""
         try:
             if not self.smart_control_enabled:
                 if self.smart_control_active:
@@ -648,7 +735,6 @@ class SmartClimateCoordinator:
             
             self.smart_control_active = True
             
-            # Get sensor values
             room_temp = await self._get_sensor_value(self.config[CONF_ROOM_SENSOR])
             outside_temp = None
             if self.config.get(CONF_OUTSIDE_SENSOR):
@@ -656,10 +742,8 @@ class SmartClimateCoordinator:
             else:
                 outside_temp = 5.0
             
-            # Check windows (returns True if heating should stop)
             window_open_stop_heating = await self._check_window_status()
             
-            # For HEATING mode
             if self.current_hvac_mode == "heat":
                 avg_house_temp = await self._get_sensor_value(self.config.get(CONF_AVERAGE_SENSOR))
                 await self._check_sleep_status()
@@ -673,7 +757,6 @@ class SmartClimateCoordinator:
                 self.comfort_offset_applied = 0.0
                 is_temperating = "Temperating" in reason
                 
-                # Apply Offset logic
                 if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
                     if not is_temperating and self.is_comfort_mode_active:
                         offset_value = self.entry.options.get("comfort_temp_offset")
@@ -684,7 +767,6 @@ class SmartClimateCoordinator:
                             temperature += offset_value
                             self.comfort_offset_applied = offset_value
                 
-                # Apply weather compensation for heating
                 weather_compensation = 0
                 has_outside_sensor = self.config.get(CONF_OUTSIDE_SENSOR) is not None
                 
@@ -694,7 +776,6 @@ class SmartClimateCoordinator:
                     temperature = max(temperature, self.min_comp_temp)
                     temperature = round(temperature)
                 
-                # Min runtime calculation for debug
                 self.min_runtime_remaining_minutes = 0
                 if self.last_heat_pump_start is not None and action == "on":
                     elapsed = time.time() - self.last_heat_pump_start
@@ -707,7 +788,6 @@ class SmartClimateCoordinator:
                     original_temperature, weather_compensation, has_outside_sensor, "heat"
                 )
             
-            # For COOLING mode
             else:
                 self.comfort_offset_applied = 0.0
                 self.min_runtime_remaining_minutes = 0
@@ -723,8 +803,6 @@ class SmartClimateCoordinator:
                 )
             
             self.current_action = action
-            # MÓDOSÍTÁS: A window_open_stop_heating értéket átadjuk bypass_protection-ként
-            # Így ha ablak miatt kell leállni, nem számít a minimum működési idő.
             await self._control_heat_pump_directly(action, temperature, self.current_hvac_mode, bypass_protection=window_open_stop_heating)
             await self._verify_heat_pump_with_contact_sensor()
             
@@ -742,123 +820,74 @@ class SmartClimateCoordinator:
             self.debug_text = f"Error: {str(e)}"
     
     async def _get_sensor_value(self, entity_id: str, default: Optional[float] = None) -> Optional[float]:
-        """Get sensor value with validation."""
-        if not entity_id:
-            return default
-        
+        if not entity_id: return default
         state = self.hass.states.get(entity_id)
-        if state is None or state.state in ["unknown", "unavailable"]:
-            return default
-        
+        if state is None or state.state in ["unknown", "unavailable"]: return default
         try:
-            value = float(state.state)
-            return value
+            return float(state.state)
         except (ValueError, TypeError):
             pass
-        
         return default
     
     async def _check_window_status(self) -> bool:
-        """Check status of windows with hysteresis (cooldown) on close."""
         open_sensors_ids = []
         open_sensors_names = []
-        
         configured_delay = self.window_delay_minutes
         
-        # 1. Collect all window sensors
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
-        # Ensure it is a list
-        if isinstance(window_sensors, str):
-            window_sensors = [window_sensors]
-            
+        if isinstance(window_sensors, str): window_sensors = [window_sensors]
         door_sensor = self.config.get(CONF_DOOR_SENSOR)
         
-        # Helper to check if a sensor is open
         def is_open(entity_id):
             if not entity_id: return False
             st = self.hass.states.get(entity_id)
             return st and st.state in [STATE_ON, "true", STATE_OPEN]
 
-        # Check Window Sensors
         for sensor_id in window_sensors:
             if is_open(sensor_id):
                 open_sensors_ids.append(sensor_id)
                 st = self.hass.states.get(sensor_id)
                 open_sensors_names.append(st.name if st.name else sensor_id)
 
-        # Check Door Sensor
         if is_open(door_sensor):
             open_sensors_ids.append(door_sensor)
             st = self.hass.states.get(door_sensor)
             open_sensors_names.append(st.name if st.name else door_sensor)
 
-        # Update detailed status for sensor.py
         self.open_window_details = open_sensors_names
-        
         now = time.time()
         
-        # LOGIC:
         if open_sensors_ids:
-            # CASE: Window is OPEN
-            
-            # Reset cooldown because window is open again
             self.window_cooldown_start = None
-            
-            # Start timer if this is the first detection
             if self.window_open_start is None:
                 self.window_open_start = now
-                _LOGGER.info(f"Window/Door open detected: {open_sensors_names}. Timer started.")
-                return False # Allow delay time before acting
+                return False
             else:
                 elapsed_minutes = (now - self.window_open_start) / 60
-                
-                if elapsed_minutes > configured_delay:
-                    return True # Stop Heating/Cooling
-                else:
-                    return False # Within delay
+                if elapsed_minutes > configured_delay: return True
+                else: return False
         else:
-            # CASE: Window is CLOSED
-            
-            # If we were previously in "Window Open" mode (timer active)
             if self.window_open_start is not None:
-                
-                # Check if we ACTUALLY reached the limit where we stopped the heat.
-                # If we closed the window BEFORE the delay passed, we should NOT enter cooldown,
-                # just reset everything.
                 elapsed_since_open = (now - self.window_open_start) / 60
-                
                 if elapsed_since_open < configured_delay:
-                    # We closed it before the timer triggered a stop.
-                    # Just reset.
-                    _LOGGER.info(f"Window closed before delay ({elapsed_since_open:.1f}m < {configured_delay}m). Resetting timer, no cooldown.")
                     self.window_open_start = None
                     self.window_cooldown_start = None
                     return False
 
-                # If we haven't started cooldown yet, start it now
                 if self.window_cooldown_start is None:
                     self.window_cooldown_start = now
-                    _LOGGER.info("All windows closed after being open > delay. Starting restore cooldown.")
                 
-                # Check cooldown duration
                 cooldown_elapsed = (now - self.window_cooldown_start) / 60
-                
-                if cooldown_elapsed < configured_delay:
-                    # Still cooling down / waiting to restore
-                    return True # Keep Heating OFF
+                if cooldown_elapsed < configured_delay: return True
                 else:
-                    # Cooldown complete
-                    _LOGGER.info("Window restore cooldown complete. Resuming climate control.")
                     self.window_open_start = None
                     self.window_cooldown_start = None
                     return False
             else:
-                # Normal operation, no windows tracking
                 self.window_cooldown_start = None
                 return False
 
     async def _check_sleep_status(self) -> None:
-        """Check if sleep mode should be active."""
         bed_sensors = self.config.get(CONF_BED_SENSORS, [])
         if len(bed_sensors) >= 1:
             bed_sensor = self.hass.states.get(bed_sensors[0])
@@ -866,7 +895,6 @@ class SmartClimateCoordinator:
                 self.sleep_mode_active = (bed_sensor.state == "on")
             
     async def _check_presence_status(self) -> bool:
-        """Check if someone is home."""
         presence_tracker = self.config.get(CONF_PRESENCE_TRACKER)
         if not presence_tracker: return True
         state = self.hass.states.get(presence_tracker)
@@ -897,7 +925,6 @@ class SmartClimateCoordinator:
         avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool
     ) -> tuple[str, Optional[float], str]:
         
-        # 1. Window Safety Logic (Highest Priority)
         if window_open_stop:
             status_msg = "Window/Door open"
             if self.window_cooldown_start is not None:
@@ -964,26 +991,17 @@ class SmartClimateCoordinator:
         else: return self.current_action, base_temp, "In deadband"
     
     async def _control_heat_pump_directly(self, action: str, temperature: Optional[float], hvac_mode: str, bypass_protection: bool = False) -> None:
-        """Control the heat pump entity directly with minimum runtime enforcement."""
         now = time.time()
-    
-        # Ellenőrizzük, ha kikapcsolásra készül, hogy a minimum futásidő letelt-e
-        # MÓDOSÍTÁS: Csak akkor blokkoljuk a leállást, ha NINCS bypass (azaz nem vészleállás/ablaknyitás)
         if action == "off" and self.last_heat_pump_start is not None and not bypass_protection:
             runtime = now - self.last_heat_pump_start
             if runtime < self.min_runtime:
-                _LOGGER.info(f"Minimum runtime not reached ({runtime:.0f}s < {self.min_runtime}s), keeping heat pump on.")
                 return
     
         if action == self.last_sent_action and temperature == self.last_sent_temperature and hvac_mode == self.last_sent_hvac_mode:
             return
     
         heat_pump_state = self.hass.states.get(self.heat_pump_entity_id)
-        if not heat_pump_state:
-            _LOGGER.error(f"Heat pump entity {self.heat_pump_entity_id} not found")
-            return
-    
-        current_hvac_mode = heat_pump_state.state
+        if not heat_pump_state: return
     
         self.last_sent_action = action
         self.last_sent_temperature = temperature
@@ -995,7 +1013,6 @@ class SmartClimateCoordinator:
             await self.async_save_state()
             
             for attempt in range(3):
-                _LOGGER.info(f"Sending heat pump command: mode={hvac_mode}, temp={temperature}°C (attempt {attempt+1}/3)")
                 await self.hass.services.async_call(
                     "climate",
                     "set_temperature",
@@ -1009,77 +1026,44 @@ class SmartClimateCoordinator:
     
                 await asyncio.sleep(8)
                 new_state = self.hass.states.get(self.heat_pump_entity_id)
-    
-                if not new_state:
-                    continue
+                if not new_state: continue
     
                 new_temp = new_state.attributes.get("temperature")
                 new_mode = new_state.state
                 hvac_action = new_state.attributes.get("hvac_action", "off")
     
-                if (
-                    new_temp == temperature and
-                    new_mode == hvac_mode and
-                    hvac_action not in ["off", "idle"]
-                ):
-                    _LOGGER.info(f" Heat pump acknowledged command on attempt {attempt+1}")
+                if (new_temp == temperature and new_mode == hvac_mode and hvac_action not in ["off", "idle"]):
                     break
                 else:
-                    _LOGGER.warning(
-                        f" Heat pump did not respond properly on attempt {attempt+1}: "
-                        f"mode={new_mode}, hvac_action={hvac_action}, temp={new_temp}"
-                    )
                     await asyncio.sleep(3)
-            else:
-                _LOGGER.error(f" Failed to start heat pump after 3 attempts")
         elif action == "off":
             for attempt in range(3):
-                _LOGGER.info(f"Turning off heat pump (attempt {attempt+1}/3)")
                 await self.hass.services.async_call(
                     "climate",
                     SERVICE_TURN_OFF,
                     {"entity_id": self.heat_pump_entity_id},
                     blocking=True,
                 )
-    
                 await asyncio.sleep(12)
-    
                 new_state = self.hass.states.get(self.heat_pump_entity_id)
-                if not new_state:
-                    continue
-    
-                if new_state.state == "off":
-                    _LOGGER.info("Heat pump successfully turned off.")
-                    break
-                else:
-                    _LOGGER.warning(f"Heat pump still on after attempt {attempt+1}, current state: {new_state.state}")
-                    await asyncio.sleep(5)
+                if not new_state: continue
+                if new_state.state == "off": break
+                else: await asyncio.sleep(5)
     
     async def _verify_heat_pump_with_contact_sensor(self) -> None:
-        """Verify heat pump is actually running using contact sensor."""
         contact_sensor = self.config.get(CONF_HEAT_PUMP_CONTACT)
-        if not contact_sensor:
-            return
-        
-        if self.current_action != "on":
-            return
-        
+        if not contact_sensor: return
+        if self.current_action != "on": return
         await asyncio.sleep(20)
         
         vent_state = self.hass.states.get(contact_sensor)
-        if not vent_state:
-            _LOGGER.warning(f"Contact sensor {contact_sensor} not found")
-            return
+        if not vent_state: return
         
         vents_open = vent_state.state == "on"
-        
         if not vents_open:
-            _LOGGER.warning(f"  Heat pump command may have failed - contact sensor shows not running. Retrying...")
-            
             heat_pump_state = self.hass.states.get(self.heat_pump_entity_id)
             if heat_pump_state:
                 current_temp = heat_pump_state.attributes.get('temperature', self.comfort_temp if self.current_hvac_mode == "heat" else self.cooling_temp)
-                
                 await self.hass.services.async_call(
                     "climate",
                     "set_temperature",
@@ -1090,22 +1074,15 @@ class SmartClimateCoordinator:
                     },
                     blocking=True,
                 )
-                
                 await asyncio.sleep(20)
                 verify_state = self.hass.states.get(contact_sensor)
-                
                 if verify_state and verify_state.state == "on":
-                    _LOGGER.info(f" Heat pump started after retry")
                     await self.hass.services.async_call(
-                        "persistent_notification",
-                        "dismiss",
-                        {"notification_id": "smart_climate_heat_pump_alert"}
+                        "persistent_notification", "dismiss", {"notification_id": "smart_climate_heat_pump_alert"}
                     )
                 else:
-                    _LOGGER.error(f" Heat pump still not running after retry")
                     await self.hass.services.async_call(
-                        "persistent_notification",
-                        "create",
+                        "persistent_notification", "create",
                         {
                             "title": "Smart Climate Control Alert",
                             "message": f"Heat pump may not be responding to commands. Contact sensor: {contact_sensor}",
@@ -1113,11 +1090,8 @@ class SmartClimateCoordinator:
                         }
                     )
         else:
-            _LOGGER.debug(f" Heat pump verified running via contact sensor")
             await self.hass.services.async_call(
-                "persistent_notification",
-                "dismiss",
-                {"notification_id": "smart_climate_heat_pump_alert"}
+                "persistent_notification", "dismiss", {"notification_id": "smart_climate_heat_pump_alert"}
             )
     
     async def _release_control(self) -> None:
@@ -1153,7 +1127,6 @@ class SmartClimateCoordinator:
         await self.async_update()
         
     async def enable_ventilation_control(self, enable: bool) -> None:
-        """Enable/Disable ventilation subsystem."""
         self.vent_enabled = enable
         await self.async_save_state()
         if not enable:

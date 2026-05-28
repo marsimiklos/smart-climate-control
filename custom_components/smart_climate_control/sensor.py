@@ -118,7 +118,7 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "window_timer_mode": window_mode_desc,
             "window_timer_min": window_timer_min,
             "window_delay_setting": self.coordinator.window_delay_minutes,
-            "open_windows": self.coordinator.open_window_details, # New List of Open Windows
+            "open_windows": self.coordinator.open_window_details,
         }
 
 
@@ -184,6 +184,8 @@ class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
     def state(self):
         if not self.coordinator.vent_enabled:
             return "Disabled"
+        if self.coordinator.airout_is_running:
+            return f"Airout ({self.coordinator.airout_direction})"
         if self.coordinator.vent_is_running:
             return f"Running ({self.coordinator.vent_reason})"
         return "Idle"
@@ -206,8 +208,13 @@ class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
         if self.coordinator.vent_start_time:
              run_elapsed_min = round((time.time() - self.coordinator.vent_start_time) / 60, 1)
 
+        airout_elapsed_min = 0
+        if self.coordinator.airout_start_time:
+             airout_elapsed_min = round((time.time() - self.coordinator.airout_start_time) / 60, 1)
+
         return {
             "is_running": self.coordinator.vent_is_running,
+            "airout_is_running": self.coordinator.airout_is_running,
             "reason": self.coordinator.vent_reason,
             "current_phase_id": self.coordinator.vent_current_phase,
             "current_phase_desc": phase_text,
@@ -218,4 +225,8 @@ class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
             "auto_interval_hours": self.coordinator.vent_auto_interval,
             "humidity_threshold": self.coordinator.humidity_threshold,
             "last_auto_run": self.coordinator.last_vent_auto_run,
+            # Airout stats
+            "airout_direction": self.coordinator.airout_direction,
+            "airout_elapsed_min": airout_elapsed_min,
+            "airout_duration_setting": self.coordinator.airout_duration,
         }

@@ -18,7 +18,6 @@ CONF_DEADBAND_BELOW = "deadband_below"
 CONF_DEADBAND_ABOVE = "deadband_above"
 CONF_MAX_HOUSE_TEMP = "max_house_temp"
 CONF_WEATHER_COMP_FACTOR = "weather_comp_factor"
-# CONF_SCHEDULE_ENTITY eltávolítva
 CONF_MAX_COMP_TEMP = "max_comp_temp"
 CONF_MIN_COMP_TEMP = "min_comp_temp"
 CONF_COMFORT_OFFSET = "comfort_temp_offset"
@@ -37,6 +36,9 @@ CONF_VENT_MAX_DURATION = "vent_max_duration"    # Max safety duration in minutes
 CONF_HUMIDITY_THRESHOLD = "humidity_threshold"  # RH% threshold to trigger ventilation
 CONF_VENT_AUTO_INTERVAL = "vent_auto_interval"  # Hours between auto runs
 CONF_VENT_FAN_SPEED = "vent_fan_speed"          # Fan speed in percentage
+
+# ÚJ: Kiszellőztetés (Airout) konstans
+CONF_AIROUT_DURATION = "airout_duration"
 
 DEFAULT_COMFORT_TEMP = 20.0
 DEFAULT_ECO_TEMP = 18.0
@@ -60,3 +62,4 @@ DEFAULT_VENT_MAX_DURATION = 120   # minutes
 DEFAULT_HUMIDITY_THRESHOLD = 60.0 # RH%
 DEFAULT_VENT_AUTO_INTERVAL = 12   # hours
 DEFAULT_VENT_FAN_SPEED = 100      # % (High speed)
+DEFAULT_AIROUT_DURATION = 30      # minutes (Alapértelmezett 30 perc)

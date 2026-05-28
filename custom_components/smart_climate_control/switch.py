@@ -25,6 +25,8 @@ async def async_setup_entry(
         # Ventilation Switches
         SmartClimateVentEnableSwitch(coordinator, config_entry),   # Enable Vent Auto
         SmartClimateVentManualSwitch(coordinator, config_entry),   # Start Manual Vent
+        # Airout Switches
+        SmartClimateAiroutSwitch(coordinator, config_entry),       # Kiszellőztetés kapcsoló
     ]
     
     async_add_entities(entities)
@@ -53,8 +55,6 @@ class SmartClimateBaseSwitch(SwitchEntity):
 
 
 class SmartClimateEnableSwitch(SmartClimateBaseSwitch):
-    """Master enable switch for Smart Climate Control."""
-
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "enable", "Climate Management")
         self._attr_icon = "mdi:robot"
@@ -82,8 +82,6 @@ class SmartClimateEnableSwitch(SmartClimateBaseSwitch):
 
 
 class SmartClimateOverrideSwitch(SmartClimateBaseSwitch):
-    """Force comfort switch - forces comfort mode when on."""
-
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "override", "Force Comfort Mode")
         self._attr_icon = "mdi:home-thermometer-outline"
@@ -117,8 +115,6 @@ class SmartClimateOverrideSwitch(SmartClimateBaseSwitch):
 
 
 class SmartClimateForceEcoSwitch(SmartClimateBaseSwitch):
-    """Force eco switch."""
-
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "force_eco", "Force Eco Mode")
         self._attr_icon = "mdi:leaf"
@@ -153,8 +149,6 @@ class SmartClimateForceEcoSwitch(SmartClimateBaseSwitch):
 
 
 class SmartClimateForceCoolingSwitch(SmartClimateBaseSwitch):
-    """Force cooling switch."""
-
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "force_cooling", "Force Cooling Mode")
         self._attr_icon = "mdi:snowflake"
@@ -195,8 +189,6 @@ class SmartClimateForceCoolingSwitch(SmartClimateBaseSwitch):
 # --- VENTILATION SWITCHES ---
 
 class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
-    """Master enable switch for Ventilation."""
-
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "vent_enable", "Ventilation Enabled")
         self._attr_icon = "mdi:fan-auto"
@@ -213,8 +205,6 @@ class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
 
 
 class SmartClimateVentManualSwitch(SmartClimateBaseSwitch):
-    """Manual run switch for Ventilation."""
-
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "vent_manual", "Ventilation Manual Run")
         self._attr_icon = "mdi:fan"
@@ -238,3 +228,31 @@ class SmartClimateVentManualSwitch(SmartClimateBaseSwitch):
     async def async_turn_off(self, **kwargs):
         self.coordinator.vent_manual_mode = False
         await self.coordinator.stop_ventilation("Manual Switch Off")
+
+
+# --- AIROUT (Kiszellőztetés) SWITCH ---
+class SmartClimateAiroutSwitch(SmartClimateBaseSwitch):
+    """Manual run switch for single-direction ventilation (Airout)."""
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "airout", "Airout (Ventilate)")
+        self._attr_icon = "mdi:weather-windy"
+
+    @property
+    def is_on(self):
+        return self.coordinator.airout_is_running
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "direction": self.coordinator.airout_direction,
+            "duration_setting": self.coordinator.airout_duration
+        }
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.start_airout()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.stop_airout("Manual Switch Off")
+        self.async_write_ha_state()

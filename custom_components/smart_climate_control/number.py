@@ -33,8 +33,9 @@ async def async_setup_entry(
         SmartClimateVentNumber(coordinator, config_entry, "humidity", "Humidity Threshold", 30, 90, "%"),
         SmartClimateVentNumber(coordinator, config_entry, "cycle_time", "Vent Cycle Time", 30, 300, "sec", step=5),
         SmartClimateVentNumber(coordinator, config_entry, "duration", "Vent Run Duration", 10, 240, "min", step=5),
-        # ÚJ: Ventilátor sebesség
         SmartClimateVentNumber(coordinator, config_entry, "fan_speed", "Ventilation Speed", 10, 100, PERCENTAGE, step=1, mode="slider"),
+        # ÚJ: Kiszellőztetés Időtartama
+        SmartClimateVentNumber(coordinator, config_entry, "airout_duration", "Airout Max Duration", 5, 120, "min", step=5),
     ]
     
     async_add_entities(entities)
@@ -124,6 +125,8 @@ class SmartClimateVentNumber(NumberEntity):
         elif param_type == "fan_speed":
              self._attr_icon = "mdi:fan"
              self._attr_mode = NumberMode.SLIDER
+        elif param_type == "airout_duration":
+             self._attr_icon = "mdi:timer-sand"
         else:
              self._attr_icon = "mdi:timer-outline"
 
@@ -137,6 +140,8 @@ class SmartClimateVentNumber(NumberEntity):
             return self.coordinator.vent_run_duration
         elif self._param_type == "fan_speed":
             return self.coordinator.vent_fan_speed
+        elif self._param_type == "airout_duration":
+            return self.coordinator.airout_duration
         return 0
 
     async def async_set_native_value(self, value: float) -> None:
@@ -146,11 +151,15 @@ class SmartClimateVentNumber(NumberEntity):
             self.coordinator.vent_cycle_time = value
         elif self._param_type == "duration":
             self.coordinator.vent_run_duration = value
+        elif self._param_type == "airout_duration":
+            self.coordinator.airout_duration = value
         elif self._param_type == "fan_speed":
             self.coordinator.vent_fan_speed = int(value)
             # If running, update speed immediately
             if self.coordinator.vent_is_running:
                 await self.coordinator._apply_fan_directions(self.coordinator.vent_current_phase)
+            if self.coordinator.airout_is_running:
+                await self.coordinator._apply_airout_direction()
         
         # Save state to persist changes
         await self.coordinator.async_save_state()
