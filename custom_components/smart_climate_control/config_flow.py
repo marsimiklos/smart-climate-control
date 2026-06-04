@@ -55,11 +55,11 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return SmartClimateOptionsFlowHandler(config_entry)
+        return SmartClimateOptionsFlowHandler()
 
 class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    def __init__(self) -> None:
+        pass
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
         if user_input is not None:
