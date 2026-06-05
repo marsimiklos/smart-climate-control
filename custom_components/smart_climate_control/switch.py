@@ -45,9 +45,9 @@ class SmartClimateOverrideSwitch(SmartClimateBaseSwitch):
         super().__init__(coordinator, config_entry, "override", "Force Comfort Mode")
         self._attr_icon = "mdi:home-thermometer-outline"
     @property
-    def is_on(self): return self.coordinator.override_mode and self.coordinator.current_hvac_mode == "heat"
+    def is_on(self): return self.coordinator.override_mode
     async def async_turn_on(self, **kwargs):
-        self.coordinator.current_hvac_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = "heat", True, False
+        self.coordinator.override_mode, self.coordinator.force_eco_mode = True, False
         await self.coordinator.async_update()
     async def async_turn_off(self, **kwargs):
         self.coordinator.override_mode = False; await self.coordinator.async_update()
@@ -74,7 +74,7 @@ class SmartClimateForceCoolingSwitch(SmartClimateBaseSwitch):
         self.coordinator.current_hvac_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = "cool", False, False
         await self.coordinator.async_update()
     async def async_turn_off(self, **kwargs):
-        self.coordinator.current_hvac_mode = "heat"; await self.coordinator.async_update()
+        self.coordinator.current_hvac_mode = "auto"; await self.coordinator.async_update()
 
 class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):

@@ -44,19 +44,19 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
     def hvac_mode(self) -> HVACMode:
         if not self.coordinator.smart_control_enabled: return HVACMode.OFF
         if self.coordinator.current_hvac_mode == "cool": return HVACMode.COOL
-        if self.coordinator.override_mode: return HVACMode.HEAT
-        return HVACMode.AUTO
+        if self.coordinator.current_hvac_mode == "auto": return HVACMode.AUTO
+        return HVACMode.HEAT
 
     @property
     def hvac_action(self) -> HVACAction:
         if not self.coordinator.smart_control_enabled: return HVACAction.OFF
-        if self.coordinator.current_action == "on": return HVACAction.COOLING if self.coordinator.current_hvac_mode == "cool" else HVACAction.HEATING
+        if self.coordinator.current_action == "on": return HVACAction.COOLING if self.coordinator.active_logic_mode == "cool" else HVACAction.HEATING
         return HVACAction.IDLE
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         if ATTR_TEMPERATURE in kwargs:
             temp = kwargs[ATTR_TEMPERATURE]
-            if self.coordinator.current_hvac_mode == "cool":
+            if self.coordinator.active_logic_mode == "cool":
                 self.coordinator.cooling_temp = temp
             elif self.coordinator.force_eco_mode:
                 self.coordinator.eco_temp = temp
@@ -73,12 +73,19 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
                 await self.coordinator.enable_smart_control(True)
             if hvac_mode in [HVACMode.HEAT, HVACMode.COOL, HVACMode.AUTO]:
                 self._attr_last_active_mode = hvac_mode
+                
             if hvac_mode == HVACMode.HEAT:
-                self.coordinator.current_hvac_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = "heat", True, False
+                self.coordinator.current_hvac_mode = "heat"
+                self.coordinator.override_mode = True 
+                self.coordinator.force_eco_mode = False
             elif hvac_mode == HVACMode.COOL:
-                self.coordinator.current_hvac_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = "cool", False, False
-            else:
-                self.coordinator.current_hvac_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = "heat", False, False
+                self.coordinator.current_hvac_mode = "cool"
+                self.coordinator.override_mode = False
+                self.coordinator.force_eco_mode = False
+            elif hvac_mode == HVACMode.AUTO:
+                self.coordinator.current_hvac_mode = "auto"
+                self.coordinator.override_mode = False
+                self.coordinator.force_eco_mode = False
         await self.coordinator.async_update()
 
     async def async_turn_on(self) -> None: await self.async_set_hvac_mode(getattr(self, '_attr_last_active_mode', HVACMode.AUTO))

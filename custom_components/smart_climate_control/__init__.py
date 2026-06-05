@@ -147,7 +147,9 @@ class SmartClimateCoordinator:
         self.force_eco_mode = False
         self.force_comfort_mode = False
         self.current_action = "off"
-        self.current_hvac_mode = "heat"
+        self.current_hvac_mode = "auto"
+        self.active_logic_mode = "heat"
+        
         self.last_avg_house_over_limit = False
         self.sleep_mode_active = False
         self.debug_text = "System initializing..."
@@ -192,7 +194,7 @@ class SmartClimateCoordinator:
         self.vent_humidity_cooldown_end = 0 
         self.last_vent_safety_check = 0 
 
-        # Airout (Kiszellőztetés) State
+        # Airout State
         self.airout_is_running = False
         self.airout_start_time = None
         self.airout_direction = "forward"
@@ -279,6 +281,8 @@ class SmartClimateCoordinator:
             "solar_sync_enabled": self.solar_sync_enabled,
             "solar_threshold": self.solar_threshold,
             "solar_offset": self.solar_offset,
+            "active_logic_mode": self.active_logic_mode,
+            "current_hvac_mode": self.current_hvac_mode,
         })
 
     async def async_initialize(self) -> None:
@@ -303,6 +307,8 @@ class SmartClimateCoordinator:
             self.solar_sync_enabled = stored_data.get("solar_sync_enabled", False)
             self.solar_threshold = stored_data.get("solar_threshold", 2000.0)
             self.solar_offset = stored_data.get("solar_offset", 1.5)
+            self.active_logic_mode = stored_data.get("active_logic_mode", "heat")
+            self.current_hvac_mode = stored_data.get("current_hvac_mode", "auto")
 
         await self._setup_window_listeners()
         _LOGGER.info(f"Smart Climate initialized. Vent enabled: {self.vent_enabled}")
@@ -368,7 +374,7 @@ class SmartClimateCoordinator:
 
         if self.vent_reason == "Free Cooling":
             room_temp = await self._get_sensor_value(self.config.get(CONF_ROOM_SENSOR))
-            target_temp = self.cooling_temp if self.current_hvac_mode == "cool" else self._determine_base_temperature(False, True)
+            target_temp = self.cooling_temp if self.active_logic_mode == "cool" else self._determine_base_temperature(False)
             if room_temp is not None and room_temp <= target_temp:
                 await self.stop_airout("Target temperature reached")
 
@@ -409,7 +415,7 @@ class SmartClimateCoordinator:
             if (now_ts - self.last_free_cooling_run) >= cooldown_sec:
                 room_temp = await self._get_sensor_value(self.config.get(CONF_ROOM_SENSOR))
                 outside_temp = await self._get_sensor_value(self.config.get(CONF_OUTSIDE_SENSOR))
-                target_temp = self.cooling_temp if self.current_hvac_mode == "cool" else self._determine_base_temperature(False, True)
+                target_temp = self.cooling_temp if self.active_logic_mode == "cool" else self._determine_base_temperature(False)
                 if room_temp is not None and outside_temp is not None:
                     if room_temp > target_temp and outside_temp < room_temp:
                         await self.start_airout(reason="Free Cooling", custom_duration=self.free_cooling_max_duration)
@@ -491,7 +497,6 @@ class SmartClimateCoordinator:
                  await self.stop_ventilation("Humidity normalized")
                  return
                  
-            # Irányrögzítés ha kint melegebb van, mint 15°C (fagyvédelem télen)
             if outside_temp is None or outside_temp >= 15.0:
                 if hum_a > self.humidity_threshold and hum_b <= self.humidity_threshold:
                     self.vent_current_phase = 1 
@@ -542,16 +547,16 @@ class SmartClimateCoordinator:
                 await self.hass.services.async_call("fan", "turn_off", {"entity_id": fan}, blocking=False)
             except Exception as e: pass
 
-    def _determine_base_temperature(self, is_cooling: bool, someone_home: bool) -> float:
-        """Kiválasztja a célhőmérsékletet a jelenlét és mód alapján."""
+    def _determine_base_temperature(self, is_cooling: bool) -> float:
+        """Select target temperature based on active mode."""
         comf = self.cooling_temp if is_cooling else self.comfort_temp
         eco = self.cooling_eco_temp if is_cooling else self.eco_temp
         
         if self.override_mode: return comf
-        if self.force_eco_mode or self.sleep_mode_active or not someone_home: return eco
+        if self.force_eco_mode or self.sleep_mode_active: return eco
         return comf
     
-    async def _calculate_heating_control(self, room_temp: Optional[float], outside_temp: float, avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool, someone_home: bool) -> tuple[str, Optional[float], str]:
+    async def _calculate_heating_control(self, room_temp: Optional[float], outside_temp: float, avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool) -> tuple[str, Optional[float], str]:
         if window_open_stop: return "off", base_temp, "Window closed - Waiting restore" if self.window_cooldown_start else "Window/Door open"
         if self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Minimum runtime active"
         if self.override_mode: return "on", base_temp, "Manual override"
@@ -579,7 +584,7 @@ class SmartClimateCoordinator:
             if self.current_action == "on" and self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Min runtime active"
             return self.current_action, base_temp, "In deadband"
     
-    async def _calculate_cooling_control(self, room_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool, someone_home: bool) -> tuple[str, Optional[float], str]:
+    async def _calculate_cooling_control(self, room_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool) -> tuple[str, Optional[float], str]:
         if window_open_stop: return "off", base_temp, "Window closed - Waiting restore" if self.window_cooldown_start else "Window/Door open"
         if room_temp is None: return "off", base_temp, "No room temp data"
         
@@ -600,7 +605,18 @@ class SmartClimateCoordinator:
             room_temp = await self._get_sensor_value(self.config.get(CONF_ROOM_SENSOR))
             outside_temp = await self._get_sensor_value(self.config.get(CONF_OUTSIDE_SENSOR), 5.0)
             window_open_stop = await self._check_window_status()
-            someone_home = await self._check_presence_status()
+            
+            self.active_logic_mode = self.current_hvac_mode
+            if self.current_hvac_mode == "auto":
+                if outside_temp is not None and outside_temp >= 22.0:
+                    self.active_logic_mode = "cool"
+                elif outside_temp is not None and outside_temp <= 16.0:
+                    self.active_logic_mode = "heat"
+                else:
+                    if room_temp is not None and room_temp >= self.cooling_temp:
+                        self.active_logic_mode = "cool"
+                    else:
+                        self.active_logic_mode = "heat"
             
             solar_power = 0.0
             solar_sensor_id = self._get_config_value(CONF_SOLAR_SENSOR, None)
@@ -608,23 +624,23 @@ class SmartClimateCoordinator:
                 solar_power = await self._get_sensor_value(solar_sensor_id, 0.0)
             is_solar_active = self.solar_sync_enabled and solar_power >= self.solar_threshold
 
-            if self.current_hvac_mode == "heat":
+            if self.active_logic_mode == "heat":
                 avg_house_temp = await self._get_sensor_value(self.config.get(CONF_AVERAGE_SENSOR))
                 await self._check_sleep_status()
                 
-                base_temp = self._determine_base_temperature(False, someone_home)
+                base_temp = self._determine_base_temperature(False)
                 if is_solar_active: base_temp += self.solar_offset
                 
                 self.current_target_temp = base_temp
                 action, temperature, reason = await self._calculate_heating_control(
-                    room_temp, outside_temp, avg_house_temp, base_temp, window_open_stop, is_solar_active, someone_home
+                    room_temp, outside_temp, avg_house_temp, base_temp, window_open_stop, is_solar_active
                 )
                 
                 original_temperature = temperature
                 self.comfort_offset_applied = 0.0
                 is_temperating = "Temperating" in reason
                 
-                if self.current_hvac_mode == "heat" and action == "on" and temperature is not None:
+                if self.active_logic_mode == "heat" and action == "on" and temperature is not None:
                     if not is_temperating and self.is_comfort_mode_active:
                         offset_value = self._get_config_value("comfort_temp_offset", 0.0)
                         if offset_value > 0:
@@ -649,15 +665,16 @@ class SmartClimateCoordinator:
                 self.comfort_offset_applied = 0.0
                 self.min_runtime_remaining_minutes = 0
                 
-                base_temp = self._determine_base_temperature(True, someone_home)
+                base_temp = self._determine_base_temperature(True)
                 if is_solar_active: base_temp -= self.solar_offset
                 
                 self.current_target_temp = base_temp
-                action, temperature, reason = await self._calculate_cooling_control(room_temp, base_temp, window_open_stop, is_solar_active, someone_home)
+                action, temperature, reason = await self._calculate_cooling_control(room_temp, base_temp, window_open_stop, is_solar_active)
                 self.debug_text = self._format_debug_text(action, temperature, room_temp, None, None, reason, None, 0, False, "cool")
             
             self.current_action = action
-            await self._control_heat_pump_directly(action, temperature, self.current_hvac_mode, bypass_protection=window_open_stop)
+            target_hvac_action = "cool" if self.active_logic_mode == "cool" else "heat"
+            await self._control_heat_pump_directly(action, temperature, target_hvac_action, bypass_protection=window_open_stop)
             await self._verify_heat_pump_with_contact_sensor()
             
             self.hass.bus.async_fire(f"{DOMAIN}_state_updated", {
@@ -704,7 +721,8 @@ class SmartClimateCoordinator:
         if vent_state and vent_state.state != "on":
             hp_state = self.hass.states.get(self.heat_pump_entity_id)
             if hp_state:
-                await self.hass.services.async_call("climate", "set_temperature", {"entity_id": self.heat_pump_entity_id, "temperature": hp_state.attributes.get('temperature', self.comfort_temp), "hvac_mode": self.current_hvac_mode}, blocking=True)
+                target_hvac_action = "cool" if self.active_logic_mode == "cool" else "heat"
+                await self.hass.services.async_call("climate", "set_temperature", {"entity_id": self.heat_pump_entity_id, "temperature": hp_state.attributes.get('temperature', self.comfort_temp), "hvac_mode": target_hvac_action}, blocking=True)
                 await asyncio.sleep(20)
                 if self.hass.states.get(contact_sensor).state != "on":
                     await self.hass.services.async_call("persistent_notification", "create", {"title": "Smart Climate Alert", "message": "Heat pump may not be responding.", "notification_id": "smart_climate_heat_pump_alert"})
@@ -770,18 +788,6 @@ class SmartClimateCoordinator:
             bed_sensor = self.hass.states.get(bed_sensors[0])
             if bed_sensor: self.sleep_mode_active = (bed_sensor.state == "on")
             
-    async def _check_presence_status(self) -> bool:
-        presence_tracker = self.config.get(CONF_PRESENCE_TRACKER)
-        if not presence_tracker: return True
-        state = self.hass.states.get(presence_tracker)
-        if not state: return True
-        st_val = str(state.state).lower().strip()
-        domain = presence_tracker.split('.')[0]
-        if domain in ['device_tracker', 'person']: return st_val not in ['away', 'not_home', 'unknown', 'unavailable']
-        elif domain == 'zone': return st_val not in ['0', 'unknown', 'unavailable']
-        elif domain == 'sensor': return st_val in ['home', 'on', 'true', '1']
-        return st_val not in ['away', 'not_home', 'off', '0', 'false', 'unknown', 'unavailable']
-
     def _format_debug_text(self, action, temperature, room_temp, avg_house_temp, outside_temp, reason, original_temperature, weather_compensation, has_outside_sensor, mode="heat") -> str:
         room_str = f"{room_temp:.1f}" if room_temp is not None else "N/A"
         avg_str = f"{avg_house_temp:.1f}" if avg_house_temp is not None else "N/A"

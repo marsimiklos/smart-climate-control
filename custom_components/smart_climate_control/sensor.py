@@ -40,6 +40,7 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "smart_control_enabled": self.coordinator.smart_control_enabled,
             "current_action": self.coordinator.current_action,
             "current_hvac_mode": self.coordinator.current_hvac_mode,
+            "active_logic_mode": self.coordinator.active_logic_mode,
             "window_open_active": self.coordinator.window_open_start is not None,
             "solar_sync_active": self.coordinator.solar_sync_enabled,
             "comfort_offset_applied": self.coordinator.comfort_offset_applied,
