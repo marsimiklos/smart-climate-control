@@ -28,9 +28,10 @@ from .const import (
     DEFAULT_DEADBAND, DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR,
     DEFAULT_MAX_COMP_TEMP, DEFAULT_MIN_COMP_TEMP, DEFAULT_LOW_TEMP_THRESHOLD,
     DEFAULT_SAFETY_CUTOFF, DEFAULT_WINDOW_DELAY, CONF_FAN_GROUP_A, CONF_FAN_GROUP_B,
-    CONF_VENT_CYCLE_TIME, CONF_VENT_DURATION, CONF_VENT_MAX_DURATION,
+    CONF_HUMIDITY_SENSOR_A, CONF_HUMIDITY_SENSOR_B, CONF_VENT_CYCLE_TIME,
+    CONF_VENT_DURATION, CONF_VENT_MAX_DURATION, CONF_HUMIDITY_THRESHOLD,
     CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED, DEFAULT_VENT_CYCLE_TIME,
-    DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION,
+    DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, CONF_AIROUT_DURATION,
     DEFAULT_AIROUT_DURATION, CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP,
     CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
@@ -190,8 +191,10 @@ class SmartClimateCoordinator:
         self.last_vent_auto_run = None
         self.vent_run_duration = self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
         self.vent_auto_interval = self._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
+        self.humidity_threshold = self._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
         self.vent_cycle_time = self._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
         self.vent_fan_speed = self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
+        self.vent_humidity_cooldown_end = 0 
         self.last_vent_safety_check = 0 
 
         # Airout State
@@ -270,6 +273,7 @@ class SmartClimateCoordinator:
             coordinator.min_runtime = entry.options.get("min_run_time", 0) * 60
             coordinator.vent_run_duration = coordinator._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
             coordinator.vent_auto_interval = coordinator._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
+            coordinator.humidity_threshold = coordinator._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
             coordinator.vent_cycle_time = coordinator._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME)
             coordinator.vent_fan_speed = coordinator._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
             coordinator.free_cooling_max_duration = coordinator._get_config_value("free_cooling_max_duration", 60)
@@ -294,6 +298,7 @@ class SmartClimateCoordinator:
             "last_vent_auto_run": self.last_vent_auto_run,
             "vent_enabled": self.vent_enabled,
             "vent_fan_speed": self.vent_fan_speed,
+            "humidity_threshold": self.humidity_threshold,
             "vent_run_duration": self.vent_run_duration,
             "vent_auto_interval": self.vent_auto_interval,
             "vent_cycle_time": self.vent_cycle_time,
@@ -325,6 +330,7 @@ class SmartClimateCoordinator:
             self.last_vent_auto_run = stored_data.get("last_vent_auto_run")
             self.vent_enabled = stored_data.get("vent_enabled", True)
             self.vent_fan_speed = stored_data.get("vent_fan_speed", self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED))
+            self.humidity_threshold = stored_data.get("humidity_threshold", self._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD))
             self.vent_run_duration = stored_data.get("vent_run_duration", self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION))
             self.vent_auto_interval = stored_data.get("vent_auto_interval", self._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL))
             self.vent_cycle_time = stored_data.get("vent_cycle_time", self._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME))
@@ -437,6 +443,15 @@ class SmartClimateCoordinator:
         if self.vent_is_running:
             await self._manage_ventilation_cycle()
 
+    async def _get_max_humidity(self, sensor_conf: Union[str, List[str], None]) -> float:
+        if not sensor_conf: return 0.0
+        sensors = sensor_conf if isinstance(sensor_conf, list) else [sensor_conf]
+        max_hum = 0.0
+        for sensor_id in sensors:
+            val = await self._get_sensor_value(sensor_id)
+            if val is not None and val > max_hum: max_hum = val
+        return max_hum
+
     async def _check_ventilation_triggers(self):
         # 1. Free Cooling Check
         if self.free_cooling_enabled and not self.airout_is_running:
@@ -453,7 +468,25 @@ class SmartClimateCoordinator:
                         await self.async_save_state()
                         return
 
-        # 2. Automatic Scheduled Run Check
+        # 2. Humidity Check
+        if time.time() > self.vent_humidity_cooldown_end:
+            hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
+            hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+            max_hum = 0
+            target_phase = 1 
+            if hum_a > self.humidity_threshold:
+                max_hum = max(max_hum, hum_a)
+                target_phase = 1 
+            if hum_b > self.humidity_threshold:
+                max_hum = max(max_hum, hum_b)
+                if hum_b > hum_a: target_phase = 2
+            
+            if max_hum > self.humidity_threshold:
+                self.vent_run_duration = self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
+                await self.start_ventilation_cycle(f"High Humidity ({max_hum:.1f}%)", start_phase=target_phase)
+                return
+
+        # 3. Automatic Scheduled Run Check
         if self.vent_auto_interval > 0:
             now_ts = time.time()
             if self.last_vent_auto_run is None:
@@ -486,20 +519,53 @@ class SmartClimateCoordinator:
 
     async def _manage_ventilation_cycle(self):
         now = time.time()
+        hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
+        hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
+        outside_temp = await self._get_sensor_value(self.config.get(CONF_OUTSIDE_SENSOR))
+        
+        if "Humidity" not in self.vent_reason and not self.vent_manual_mode:
+             current_max = max(hum_a, hum_b)
+             if current_max > self.humidity_threshold:
+                  self.vent_reason = f"Humidity (Merge: {self.vent_reason})"
+
         max_duration_min = self._get_config_value(CONF_VENT_MAX_DURATION, DEFAULT_VENT_MAX_DURATION)
         limit_min = min(self.vent_run_duration, max_duration_min)
         run_time_min = (now - self.vent_start_time) / 60
         
-        # Check if duration is reached
+        is_humidity_locked = False
+        old_phase = self.vent_current_phase
+        
+        if "Humidity" in self.vent_reason:
+            current_max = max(hum_a, hum_b)
+            if "Merge" not in self.vent_reason:
+                self.vent_reason = f"High Humidity ({current_max:.1f}%)"
+
+            if current_max < (self.humidity_threshold - 5):
+                 await self.stop_ventilation("Humidity normalized")
+                 return
+                 
+            if outside_temp is None or outside_temp >= 15.0:
+                if hum_a > self.humidity_threshold and hum_b <= self.humidity_threshold:
+                    self.vent_current_phase = 1 
+                    is_humidity_locked = True
+                elif hum_b > self.humidity_threshold and hum_a <= self.humidity_threshold:
+                    self.vent_current_phase = 2 
+                    is_humidity_locked = True
+
+        if old_phase != self.vent_current_phase:
+            await self._apply_fan_directions(self.vent_current_phase)
+
         if run_time_min >= limit_min and not self.vent_manual_mode:
+            if "Humidity" in self.vent_reason:
+                self.vent_humidity_cooldown_end = now + (15 * 60)
             await self.stop_ventilation(f"Duration reached ({limit_min}m)")
             return
 
-        # Check if cycle phase needs to be toggled
         cycle_elapsed = now - self.vent_cycle_start_time
         if cycle_elapsed >= self.vent_cycle_time:
             self.vent_cycle_start_time = now
-            self.vent_current_phase = 2 if self.vent_current_phase == 1 else 1
+            if not is_humidity_locked:
+                self.vent_current_phase = 2 if self.vent_current_phase == 1 else 1
             await self._apply_fan_directions(self.vent_current_phase)
 
     async def _apply_fan_directions(self, phase: int):
@@ -786,8 +852,10 @@ class SmartClimateCoordinator:
         open_sensors_ids, open_sensors_names = [], []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
+        if window_sensors: sensors.extend(window_sensors)
         
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
+        if door_sensor: sensors.append(door_sensor)
         
         def is_open(entity_id):
             if not entity_id: return False
