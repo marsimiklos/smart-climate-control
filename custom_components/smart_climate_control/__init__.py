@@ -826,10 +826,8 @@ class SmartClimateCoordinator:
         open_sensors_ids, open_sensors_names = [], []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
-        if window_sensors: sensors.extend(window_sensors)
         
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
-        if door_sensor: sensors.append(door_sensor)
         
         def is_open(entity_id):
             if not entity_id: return False

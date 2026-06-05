@@ -88,5 +88,9 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
                 self.coordinator.force_eco_mode = False
         await self.coordinator.async_update()
 
-    async def async_turn_on(self) -> None: await self.async_set_hvac_mode(getattr(self, '_attr_last_active_mode', HVACMode.AUTO))
-    async def async_turn_off(self) -> None: await self.async_set_hvac_mode(HVACMode.OFF)
+    async def async_turn_on(self) -> None: 
+        if not self.coordinator.smart_control_enabled:
+            await self.coordinator.enable_smart_control(True)
+            
+    async def async_turn_off(self) -> None: 
+        await self.async_set_hvac_mode(HVACMode.OFF)

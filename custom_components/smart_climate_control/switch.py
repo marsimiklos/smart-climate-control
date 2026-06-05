@@ -12,13 +12,13 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
     async_add_entities([
         SmartClimateOverrideSwitch(coordinator, config_entry),
         SmartClimateForceEcoSwitch(coordinator, config_entry),
-        SmartClimateForceCoolingSwitch(coordinator, config_entry),
         SmartClimateEnableSwitch(coordinator, config_entry),
         SmartClimateVentEnableSwitch(coordinator, config_entry),
         SmartClimateVentManualSwitch(coordinator, config_entry),
         SmartClimateAiroutSwitch(coordinator, config_entry),
         SmartClimateFreeCoolingSwitch(coordinator, config_entry),
         SmartClimateSolarSwitch(coordinator, config_entry),
+        SmartClimateCirculateSwitch(coordinator, config_entry),
     ])
 
 class SmartClimateBaseSwitch(SwitchEntity):
@@ -63,18 +63,6 @@ class SmartClimateForceEcoSwitch(SmartClimateBaseSwitch):
         await self.coordinator.async_update()
     async def async_turn_off(self, **kwargs):
         self.coordinator.force_eco_mode = False; await self.coordinator.async_update()
-
-class SmartClimateForceCoolingSwitch(SmartClimateBaseSwitch):
-    def __init__(self, coordinator, config_entry):
-        super().__init__(coordinator, config_entry, "force_cooling", "Force Cooling Mode")
-        self._attr_icon = "mdi:snowflake"
-    @property
-    def is_on(self): return self.coordinator.current_hvac_mode == "cool"
-    async def async_turn_on(self, **kwargs):
-        self.coordinator.current_hvac_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = "cool", False, False
-        await self.coordinator.async_update()
-    async def async_turn_off(self, **kwargs):
-        self.coordinator.current_hvac_mode = "auto"; await self.coordinator.async_update()
 
 class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):
@@ -126,3 +114,18 @@ class SmartClimateSolarSwitch(SmartClimateBaseSwitch):
         self.coordinator.solar_sync_enabled = True; await self.coordinator.async_save_state(); self.async_write_ha_state()
     async def async_turn_off(self, **kwargs):
         self.coordinator.solar_sync_enabled = False; await self.coordinator.async_save_state(); self.async_write_ha_state()
+
+class SmartClimateCirculateSwitch(SmartClimateBaseSwitch):
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "circulate_enable", "Periodic Fan Circulation")
+        self._attr_icon = "mdi:fan-sync"
+    @property
+    def is_on(self): return self.coordinator.circulate_enabled
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.circulate_enabled = True; await self.coordinator.async_save_state(); self.async_write_ha_state()
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.circulate_enabled = False
+        if self.coordinator.circulate_is_running:
+            await self.coordinator._stop_circulation()
+        await self.coordinator.async_save_state()
+        self.async_write_ha_state()
