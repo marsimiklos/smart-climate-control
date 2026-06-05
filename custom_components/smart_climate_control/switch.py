@@ -9,17 +9,26 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    async_add_entities([
+    
+    # Always load these base switches
+    switches = [
         SmartClimateOverrideSwitch(coordinator, config_entry),
         SmartClimateForceEcoSwitch(coordinator, config_entry),
         SmartClimateEnableSwitch(coordinator, config_entry),
-        SmartClimateVentEnableSwitch(coordinator, config_entry),
-        SmartClimateVentManualSwitch(coordinator, config_entry),
-        SmartClimateAiroutSwitch(coordinator, config_entry),
         SmartClimateFreeCoolingSwitch(coordinator, config_entry),
         SmartClimateSolarSwitch(coordinator, config_entry),
         SmartClimateCirculateSwitch(coordinator, config_entry),
-    ])
+    ]
+    
+    # Only load ventilation switches if the feature is enabled in options
+    if getattr(coordinator, "has_ventilation", True):
+        switches.extend([
+            SmartClimateVentEnableSwitch(coordinator, config_entry),
+            SmartClimateVentManualSwitch(coordinator, config_entry),
+            SmartClimateAiroutSwitch(coordinator, config_entry),
+        ])
+        
+    async_add_entities(switches)
 
 class SmartClimateBaseSwitch(SwitchEntity):
     _attr_has_entity_name = True

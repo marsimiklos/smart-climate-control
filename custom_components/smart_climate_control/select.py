@@ -9,10 +9,16 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    async_add_entities([
-        SmartClimateAiroutDirectionSelect(coordinator, config_entry),
+    
+    selects = [
         SmartClimateOperatingModeSelect(coordinator, config_entry)
-    ])
+    ]
+    
+    # Only load ventilation select if the feature is enabled in options
+    if getattr(coordinator, "has_ventilation", True):
+        selects.append(SmartClimateAiroutDirectionSelect(coordinator, config_entry))
+        
+    async_add_entities(selects)
 
 class SmartClimateAiroutDirectionSelect(SelectEntity):
     _attr_has_entity_name = True
@@ -38,7 +44,6 @@ class SmartClimateAiroutDirectionSelect(SelectEntity):
 
 class SmartClimateOperatingModeSelect(SelectEntity):
     _attr_has_entity_name = True
-    # Options for manual operating mode control
     _attr_options = ["auto", "heat", "cool"]
     
     def __init__(self, coordinator, config_entry):
@@ -53,14 +58,10 @@ class SmartClimateOperatingModeSelect(SelectEntity):
         return self.coordinator.current_hvac_mode
 
     async def async_select_option(self, option: str) -> None:
-        # Update the main HVAC mode
         self.coordinator.current_hvac_mode = option
-        
-        # Reset override flags when manually changing the base operating mode
         self.coordinator.override_mode = False
         self.coordinator.force_eco_mode = False
         
-        # Save state and trigger logic update
         await self.coordinator.async_save_state()
         await self.coordinator.async_update()
         self.async_write_ha_state()

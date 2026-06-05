@@ -35,7 +35,8 @@ from .const import (
     DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, CONF_AIROUT_DURATION,
     DEFAULT_AIROUT_DURATION, CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP,
     CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
-    DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED
+    DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED,
+    CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -227,6 +228,10 @@ class SmartClimateCoordinator:
         return self.config.get(key, default)
     
     @property
+    def has_ventilation(self) -> bool:
+        return self._get_config_value(CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION)
+    
+    @property
     def deadband_below(self) -> float: return self._get_config_value(CONF_DEADBAND_BELOW, DEFAULT_DEADBAND)
     @property
     def deadband_above(self) -> float: return self._get_config_value(CONF_DEADBAND_ABOVE, DEFAULT_DEADBAND)
@@ -273,6 +278,11 @@ class SmartClimateCoordinator:
             coordinator.vent_fan_speed = coordinator._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
             coordinator.free_cooling_max_duration = coordinator._get_config_value("free_cooling_max_duration", 60)
             coordinator.free_cooling_cooldown = coordinator._get_config_value("free_cooling_cooldown", 3)
+            
+            if not coordinator.has_ventilation:
+                await coordinator.stop_ventilation("Ventilation Feature Disabled")
+                await coordinator.stop_airout("Ventilation Feature Disabled")
+                
             await coordinator._setup_window_listeners()
             await coordinator.async_update()
     
@@ -288,6 +298,10 @@ class SmartClimateCoordinator:
             "last_vent_auto_run": self.last_vent_auto_run,
             "vent_enabled": self.vent_enabled,
             "vent_fan_speed": self.vent_fan_speed,
+            "humidity_threshold": self.humidity_threshold,
+            "vent_run_duration": self.vent_run_duration,
+            "vent_auto_interval": self.vent_auto_interval,
+            "vent_cycle_time": self.vent_cycle_time,
             "airout_direction": self.airout_direction,
             "airout_duration": self.airout_duration,
             "free_cooling_enabled": self.free_cooling_enabled,
@@ -316,6 +330,10 @@ class SmartClimateCoordinator:
             self.last_vent_auto_run = stored_data.get("last_vent_auto_run")
             self.vent_enabled = stored_data.get("vent_enabled", True)
             self.vent_fan_speed = stored_data.get("vent_fan_speed", self._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED))
+            self.humidity_threshold = stored_data.get("humidity_threshold", self._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD))
+            self.vent_run_duration = stored_data.get("vent_run_duration", self._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION))
+            self.vent_auto_interval = stored_data.get("vent_auto_interval", self._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL))
+            self.vent_cycle_time = stored_data.get("vent_cycle_time", self._get_config_value(CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME))
             self.airout_direction = stored_data.get("airout_direction", "forward")
             self.airout_duration = stored_data.get("airout_duration", self._get_config_value(CONF_AIROUT_DURATION, DEFAULT_AIROUT_DURATION))
             self.free_cooling_enabled = stored_data.get("free_cooling_enabled", False)
@@ -400,6 +418,11 @@ class SmartClimateCoordinator:
                 await self.stop_airout("Target temperature reached")
 
     async def async_update_ventilation(self, now=None) -> None:
+        if not self.has_ventilation:
+            if self.vent_is_running: await self.stop_ventilation("Ventilation Feature Disabled")
+            if self.airout_is_running: await self.stop_airout("Ventilation Feature Disabled")
+            return
+            
         if not self.vent_enabled:
             if self.vent_is_running: await self.stop_ventilation("Ventilation Disabled")
             if self.airout_is_running: await self.stop_airout("Ventilation Disabled")
@@ -826,8 +849,10 @@ class SmartClimateCoordinator:
         open_sensors_ids, open_sensors_names = [], []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
+        if window_sensors: sensors.extend(window_sensors)
         
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
+        if door_sensor: sensors.append(door_sensor)
         
         def is_open(entity_id):
             if not entity_id: return False

@@ -11,13 +11,19 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    async_add_entities([
+    
+    sensors = [
         SmartClimateStatusSensor(coordinator, config_entry),
         SmartClimateModeSensor(coordinator, config_entry),
         SmartClimateTargetSensor(coordinator, config_entry),
-        SmartClimateVentStatusSensor(coordinator, config_entry),
         SmartClimateLogicModeSensor(coordinator, config_entry),
-    ])
+    ]
+    
+    # Only load ventilation sensor if the feature is enabled in options
+    if getattr(coordinator, "has_ventilation", True):
+        sensors.append(SmartClimateVentStatusSensor(coordinator, config_entry))
+        
+    async_add_entities(sensors)
 
 class SmartClimateBaseSensor(SensorEntity):
     _attr_has_entity_name = True
@@ -102,7 +108,6 @@ class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
             "current_phase_id": self.coordinator.vent_current_phase,
         }
 
-# New sensor to show the active background logic (Heating vs Cooling)
 class SmartClimateLogicModeSensor(SmartClimateBaseSensor):
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "logic_mode", "Active Logic")
@@ -110,6 +115,5 @@ class SmartClimateLogicModeSensor(SmartClimateBaseSensor):
         
     @property
     def state(self):
-        if not self.coordinator.smart_control_enabled: 
-            return "Off"
+        if not self.coordinator.smart_control_enabled: return "Off"
         return "Cooling" if self.coordinator.active_logic_mode == "cool" else "Heating"
