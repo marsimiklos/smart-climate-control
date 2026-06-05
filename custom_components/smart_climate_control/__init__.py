@@ -257,6 +257,7 @@ class SmartClimateCoordinator:
             coordinator.vent_fan_speed = coordinator._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
             coordinator.free_cooling_max_duration = coordinator._get_config_value("free_cooling_max_duration", 60)
             coordinator.free_cooling_cooldown = coordinator._get_config_value("free_cooling_cooldown", 3)
+            # Ez újra felépíti a listenereket, így az options-ből is beolvassa a frissített ablak/ajtó szenzorokat!
             await coordinator._setup_window_listeners()
             await coordinator.async_update()
     
@@ -321,8 +322,10 @@ class SmartClimateCoordinator:
         sensors = []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
-        sensors.extend(window_sensors)
-        door_sensor = self.config.get(CONF_DOOR_SENSOR)
+        if window_sensors: sensors.extend(window_sensors)
+        
+        # JAVÍTVA: config.get helyett _get_config_value, hogy opciókból is működjön
+        door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
         if door_sensor: sensors.append(door_sensor)
         
         if sensors:
@@ -748,7 +751,9 @@ class SmartClimateCoordinator:
         open_sensors_ids, open_sensors_names = [], []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
-        door_sensor = self.config.get(CONF_DOOR_SENSOR)
+        
+        # JAVÍTVA: Itt is _get_config_value kell, hogy kövesse az options-t
+        door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
         
         def is_open(entity_id):
             if not entity_id: return False

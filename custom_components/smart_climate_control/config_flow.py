@@ -46,6 +46,7 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_OUTSIDE_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
             vol.Optional(CONF_AVERAGE_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
             vol.Optional(CONF_WINDOW_SENSORS): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", multiple=True)),
+            vol.Optional(CONF_DOOR_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
             vol.Optional(CONF_HEAT_PUMP_CONTACT): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
             vol.Optional(CONF_PRESENCE_TRACKER): selector.EntitySelector(selector.EntitySelectorConfig()),
             vol.Optional(CONF_SOLAR_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power")),
@@ -69,6 +70,10 @@ class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
         def get_list_opt(key): return self.config_entry.options.get(key, self.config_entry.data.get(key, []))
 
         schema = vol.Schema({
+            # Hozzáadva az ablak és ajtó szenzorok a beállításokhoz
+            vol.Optional(CONF_WINDOW_SENSORS, default=get_list_opt(CONF_WINDOW_SENSORS)): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", multiple=True)),
+            vol.Optional(CONF_DOOR_SENSOR, default=get_opt(CONF_DOOR_SENSOR, "")): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
+            
             vol.Optional(CONF_COOLING_ECO_TEMP, default=get_opt(CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP)): selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C")),
             vol.Optional(CONF_FAN_GROUP_A, default=get_list_opt(CONF_FAN_GROUP_A)): selector.EntitySelector(selector.EntitySelectorConfig(domain="fan", multiple=True)),
             vol.Optional(CONF_FAN_GROUP_B, default=get_list_opt(CONF_FAN_GROUP_B)): selector.EntitySelector(selector.EntitySelectorConfig(domain="fan", multiple=True)),
