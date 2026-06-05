@@ -33,7 +33,9 @@ from .const import (
     CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED, DEFAULT_VENT_CYCLE_TIME,
     DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD,
     DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, CONF_AIROUT_DURATION,
-    DEFAULT_AIROUT_DURATION, CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP
+    DEFAULT_AIROUT_DURATION, CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP,
+    CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
+    DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -211,6 +213,12 @@ class SmartClimateCoordinator:
         self.solar_sync_enabled = False
         self.solar_threshold = 2000.0 
         self.solar_offset = 1.5 
+        
+        # Periodic Circulation State
+        self.circulate_enabled = False
+        self.circulate_is_running = False
+        self.circulate_start_time = 0
+        self.last_cooling_active_time = time.time()
 
         self.entry.add_update_listener(self.async_options_updated)
     
@@ -236,6 +244,14 @@ class SmartClimateCoordinator:
     def safety_cutoff_offset(self) -> float: return self._get_config_value(CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF)
     @property
     def window_delay_minutes(self) -> float: return self._get_config_value(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
+    
+    # Periodic Circulation Config
+    @property
+    def circulate_interval(self) -> float: return self._get_config_value(CONF_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_INTERVAL)
+    @property
+    def circulate_duration(self) -> float: return self._get_config_value(CONF_CIRCULATE_DURATION, DEFAULT_CIRCULATE_DURATION)
+    @property
+    def circulate_fan_speed(self) -> float: return self._get_config_value(CONF_CIRCULATE_FAN_SPEED, DEFAULT_CIRCULATE_FAN_SPEED)
 
     @property
     def is_comfort_mode_active(self) -> bool:
@@ -257,7 +273,6 @@ class SmartClimateCoordinator:
             coordinator.vent_fan_speed = coordinator._get_config_value(CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED)
             coordinator.free_cooling_max_duration = coordinator._get_config_value("free_cooling_max_duration", 60)
             coordinator.free_cooling_cooldown = coordinator._get_config_value("free_cooling_cooldown", 3)
-            # Ez újra felépíti a listenereket, így az options-ből is beolvassa a frissített ablak/ajtó szenzorokat!
             await coordinator._setup_window_listeners()
             await coordinator.async_update()
     
@@ -284,6 +299,8 @@ class SmartClimateCoordinator:
             "solar_offset": self.solar_offset,
             "active_logic_mode": self.active_logic_mode,
             "current_hvac_mode": self.current_hvac_mode,
+            "circulate_enabled": self.circulate_enabled,
+            "last_cooling_active_time": self.last_cooling_active_time,
         })
 
     async def async_initialize(self) -> None:
@@ -310,6 +327,8 @@ class SmartClimateCoordinator:
             self.solar_offset = stored_data.get("solar_offset", 1.5)
             self.active_logic_mode = stored_data.get("active_logic_mode", "heat")
             self.current_hvac_mode = stored_data.get("current_hvac_mode", "auto")
+            self.circulate_enabled = stored_data.get("circulate_enabled", False)
+            self.last_cooling_active_time = stored_data.get("last_cooling_active_time", time.time())
 
         await self._setup_window_listeners()
         _LOGGER.info(f"Smart Climate initialized. Vent enabled: {self.vent_enabled}")
@@ -324,7 +343,6 @@ class SmartClimateCoordinator:
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
         if window_sensors: sensors.extend(window_sensors)
         
-        # JAVÍTVA: config.get helyett _get_config_value, hogy opciókból is működjön
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
         if door_sensor: sensors.append(door_sensor)
         
@@ -532,12 +550,13 @@ class SmartClimateCoordinator:
         await self._set_fans(fans_a, dir_a)
         await self._set_fans(fans_b, dir_b)
 
-    async def _set_fans(self, fan_list, direction):
+    async def _set_fans(self, fan_list, direction, override_speed=None):
         if not fan_list: return
         fans = fan_list if isinstance(fan_list, list) else [fan_list]
+        speed = override_speed if override_speed is not None else self.vent_fan_speed
         for fan in fans:
             try:
-                await self.hass.services.async_call("fan", "set_percentage", {"entity_id": fan, "percentage": self.vent_fan_speed}, blocking=False)
+                await self.hass.services.async_call("fan", "set_percentage", {"entity_id": fan, "percentage": speed}, blocking=False)
                 await self.hass.services.async_call("fan", "set_direction", {"entity_id": fan, "direction": direction}, blocking=False)
             except Exception as e:
                 _LOGGER.warning(f"Failed to set fan {fan}: {e}")
@@ -549,6 +568,30 @@ class SmartClimateCoordinator:
             try:
                 await self.hass.services.async_call("fan", "turn_off", {"entity_id": fan}, blocking=False)
             except Exception as e: pass
+
+    async def _start_circulation(self):
+        self.circulate_is_running = True
+        self.circulate_start_time = time.time()
+        fans_a = self._get_config_value(CONF_FAN_GROUP_A, [])
+        fans_b = self._get_config_value(CONF_FAN_GROUP_B, [])
+        all_fans = []
+        if isinstance(fans_a, list): all_fans.extend(fans_a)
+        elif fans_a: all_fans.append(fans_a)
+        if isinstance(fans_b, list): all_fans.extend(fans_b)
+        elif fans_b: all_fans.append(fans_b)
+        await self._set_fans(all_fans, "forward", self.circulate_fan_speed)
+
+    async def _stop_circulation(self):
+        self.circulate_is_running = False
+        self.last_cooling_active_time = time.time()
+        fans_a = self._get_config_value(CONF_FAN_GROUP_A, [])
+        fans_b = self._get_config_value(CONF_FAN_GROUP_B, [])
+        all_fans = []
+        if isinstance(fans_a, list): all_fans.extend(fans_a)
+        elif fans_a: all_fans.append(fans_a)
+        if isinstance(fans_b, list): all_fans.extend(fans_b)
+        elif fans_b: all_fans.append(fans_b)
+        await self._turn_off_fans(all_fans)
 
     def _determine_base_temperature(self, is_cooling: bool) -> float:
         """Select target temperature based on active mode."""
@@ -673,6 +716,30 @@ class SmartClimateCoordinator:
                 
                 self.current_target_temp = base_temp
                 action, temperature, reason = await self._calculate_cooling_control(room_temp, base_temp, window_open_stop, is_solar_active)
+                
+                # --- Periodic Fan Circulation Logic ---
+                if action == "on":
+                    self.last_cooling_active_time = time.time()
+                    if self.circulate_is_running:
+                        await self._stop_circulation()
+                elif action == "off":
+                    elapsed = (time.time() - self.last_cooling_active_time) / 3600
+                    target_interval = self.circulate_interval
+                    if self.force_eco_mode or self.sleep_mode_active:
+                        target_interval *= 2
+                    
+                    if not self.circulate_is_running and elapsed >= target_interval and self.circulate_enabled:
+                        await self._start_circulation()
+                        
+                    if self.circulate_is_running:
+                        circ_elapsed_min = (time.time() - self.circulate_start_time) / 60
+                        if circ_elapsed_min >= self.circulate_duration:
+                            await self._stop_circulation()
+                        else:
+                            action = "fan_only"
+                            reason = f"Periodic Circulation ({int(self.circulate_duration - circ_elapsed_min)} min left)"
+                # --------------------------------------
+
                 self.debug_text = self._format_debug_text(action, temperature, room_temp, None, None, reason, None, 0, False, "cool")
             
             self.current_action = action
@@ -707,6 +774,14 @@ class SmartClimateCoordinator:
                 await asyncio.sleep(8)
                 new_state = self.hass.states.get(self.heat_pump_entity_id)
                 if new_state and new_state.attributes.get("temperature") == temperature and new_state.state == hvac_mode and new_state.attributes.get("hvac_action", "off") not in ["off", "idle"]: break
+                await asyncio.sleep(3)
+        elif action == "fan_only":
+            await self.async_save_state()
+            for _ in range(3):
+                await self.hass.services.async_call("climate", "set_hvac_mode", {"entity_id": self.heat_pump_entity_id, "hvac_mode": "fan_only"}, blocking=True)
+                await asyncio.sleep(8)
+                new_state = self.hass.states.get(self.heat_pump_entity_id)
+                if new_state and new_state.state == "fan_only": break
                 await asyncio.sleep(3)
         elif action == "off":
             for _ in range(3):
@@ -751,9 +826,10 @@ class SmartClimateCoordinator:
         open_sensors_ids, open_sensors_names = [], []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
+        if window_sensors: sensors.extend(window_sensors)
         
-        # JAVÍTVA: Itt is _get_config_value kell, hogy kövesse az options-t
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
+        if door_sensor: sensors.append(door_sensor)
         
         def is_open(entity_id):
             if not entity_id: return False
@@ -798,7 +874,11 @@ class SmartClimateCoordinator:
         avg_str = f"{avg_house_temp:.1f}" if avg_house_temp is not None else "N/A"
         outside_str = f"{outside_temp:.1f}°C" if has_outside_sensor and outside_temp is not None else "N/A"
         rt_info = f" | Min runtime: {self.min_runtime_remaining_minutes} min" if self.min_runtime_remaining_minutes > 0 else ""
-        if mode == "cool": return f"COOL {'ON' if action=='on' else 'OFF'} | {temperature} | R: {room_str}°C | {reason}{rt_info}"
+        if mode == "cool": 
+            if action == "fan_only": act_str = "FAN"
+            elif action == "on": act_str = "ON"
+            else: act_str = "OFF"
+            return f"COOL {act_str} | {temperature} | R: {room_str}°C | {reason}{rt_info}"
         if action == "off": return f"OFF | R: {room_str}°C | H: {avg_str}°C | O: {outside_str} | {reason}{rt_info}"
         mode_str = "Force Comfort" if self.override_mode else "Eco" if (self.force_eco_mode or self.sleep_mode_active) else "Comfort"
         temp_str = f"{temperature}°C (B:{original_temperature} +{weather_compensation})" if weather_compensation > 0 else f"{temperature}°C"

@@ -20,13 +20,16 @@ from .const import (
     CONF_FAN_GROUP_B, CONF_HUMIDITY_SENSOR_A, CONF_HUMIDITY_SENSOR_B,
     CONF_VENT_CYCLE_TIME, CONF_VENT_DURATION, CONF_VENT_MAX_DURATION,
     CONF_HUMIDITY_THRESHOLD, CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED,
-    CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, DEFAULT_COMFORT_TEMP, 
-    DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_DEADBAND, DEFAULT_MAX_HOUSE_TEMP,
-    DEFAULT_WEATHER_COMP_FACTOR, DEFAULT_MAX_COMP_TEMP, DEFAULT_MIN_COMP_TEMP,
-    DEFAULT_COMFORT_OFFSET, DEFAULT_MIN_RUN_TIME, DEFAULT_LOW_TEMP_THRESHOLD,
-    DEFAULT_SAFETY_CUTOFF, DEFAULT_VENT_CYCLE_TIME, DEFAULT_VENT_DURATION,
-    DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD, DEFAULT_VENT_AUTO_INTERVAL,
-    DEFAULT_VENT_FAN_SPEED, DEFAULT_WINDOW_DELAY, DEFAULT_COOLING_ECO_TEMP
+    CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, 
+    CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
+    DEFAULT_COMFORT_TEMP, DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_DEADBAND, 
+    DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR, DEFAULT_MAX_COMP_TEMP, 
+    DEFAULT_MIN_COMP_TEMP, DEFAULT_COMFORT_OFFSET, DEFAULT_MIN_RUN_TIME, 
+    DEFAULT_LOW_TEMP_THRESHOLD, DEFAULT_SAFETY_CUTOFF, DEFAULT_VENT_CYCLE_TIME, 
+    DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD, 
+    DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, DEFAULT_WINDOW_DELAY, 
+    DEFAULT_COOLING_ECO_TEMP, DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, 
+    DEFAULT_CIRCULATE_FAN_SPEED
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,47 +82,47 @@ class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict = {}
 
-        # 1. Szám típusú beállítások (Ezeknél mindig van default érték)
+        # 1. Number settings with defaults
         schema_dict[vol.Optional(CONF_COOLING_ECO_TEMP, default=get_opt(CONF_COOLING_ECO_TEMP) or DEFAULT_COOLING_ECO_TEMP)] = selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C"))
         schema_dict[vol.Optional(CONF_WINDOW_DELAY, default=get_opt(CONF_WINDOW_DELAY) or DEFAULT_WINDOW_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
         schema_dict[vol.Optional(CONF_MIN_RUN_TIME, default=get_opt(CONF_MIN_RUN_TIME) or DEFAULT_MIN_RUN_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=120, step=5, mode="slider", unit_of_measurement="min"))
+        
+        # Periodic Fan Circulation settings (English Standard Units)
+        schema_dict[vol.Optional(CONF_CIRCULATE_INTERVAL, default=get_opt(CONF_CIRCULATE_INTERVAL) or DEFAULT_CIRCULATE_INTERVAL)] = selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=12, step=1, mode="slider", unit_of_measurement="h"))
+        schema_dict[vol.Optional(CONF_CIRCULATE_DURATION, default=get_opt(CONF_CIRCULATE_DURATION) or DEFAULT_CIRCULATE_DURATION)] = selector.NumberSelector(selector.NumberSelectorConfig(min=5, max=60, step=5, mode="slider", unit_of_measurement="min"))
+        schema_dict[vol.Optional(CONF_CIRCULATE_FAN_SPEED, default=get_opt(CONF_CIRCULATE_FAN_SPEED) or DEFAULT_CIRCULATE_FAN_SPEED)] = selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%"))
+
+        # Ventilation settings
         schema_dict[vol.Optional(CONF_VENT_CYCLE_TIME, default=get_opt(CONF_VENT_CYCLE_TIME) or DEFAULT_VENT_CYCLE_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=30, max=300, step=5, mode="slider", unit_of_measurement="sec"))
         schema_dict[vol.Optional(CONF_VENT_DURATION, default=get_opt(CONF_VENT_DURATION) or DEFAULT_VENT_DURATION)] = selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=240, step=5, mode="slider", unit_of_measurement="min"))
         schema_dict[vol.Optional(CONF_VENT_FAN_SPEED, default=get_opt(CONF_VENT_FAN_SPEED) or DEFAULT_VENT_FAN_SPEED)] = selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%"))
 
-        # 2. Entitás választók (Itt meg kell vizsgálni, hogy van-e már kiválasztott adat, különben hibát dob a HA)
+        # 2. Entity selectors (conditional defaults to prevent HA errors)
         
-        # Ablak szenzorok
         win_val = get_list_opt(CONF_WINDOW_SENSORS)
         win_key = vol.Optional(CONF_WINDOW_SENSORS, default=win_val) if win_val else vol.Optional(CONF_WINDOW_SENSORS)
         schema_dict[win_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", multiple=True))
 
-        # Ajtó szenzor
         door_val = get_opt(CONF_DOOR_SENSOR)
         door_key = vol.Optional(CONF_DOOR_SENSOR, default=door_val) if door_val else vol.Optional(CONF_DOOR_SENSOR)
         schema_dict[door_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor"))
 
-        # Ventilátor A
         fan_a_val = get_list_opt(CONF_FAN_GROUP_A)
         fan_a_key = vol.Optional(CONF_FAN_GROUP_A, default=fan_a_val) if fan_a_val else vol.Optional(CONF_FAN_GROUP_A)
         schema_dict[fan_a_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="fan", multiple=True))
 
-        # Ventilátor B
         fan_b_val = get_list_opt(CONF_FAN_GROUP_B)
         fan_b_key = vol.Optional(CONF_FAN_GROUP_B, default=fan_b_val) if fan_b_val else vol.Optional(CONF_FAN_GROUP_B)
         schema_dict[fan_b_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="fan", multiple=True))
 
-        # Páratartalom A
         hum_a_val = get_list_opt(CONF_HUMIDITY_SENSOR_A)
         hum_a_key = vol.Optional(CONF_HUMIDITY_SENSOR_A, default=hum_a_val) if hum_a_val else vol.Optional(CONF_HUMIDITY_SENSOR_A)
         schema_dict[hum_a_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True))
 
-        # Páratartalom B
         hum_b_val = get_list_opt(CONF_HUMIDITY_SENSOR_B)
         hum_b_key = vol.Optional(CONF_HUMIDITY_SENSOR_B, default=hum_b_val) if hum_b_val else vol.Optional(CONF_HUMIDITY_SENSOR_B)
         schema_dict[hum_b_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True))
 
-        # Napelem Szenzor
         solar_val = get_opt(CONF_SOLAR_SENSOR)
         solar_key = vol.Optional(CONF_SOLAR_SENSOR, default=solar_val) if solar_val else vol.Optional(CONF_SOLAR_SENSOR)
         schema_dict[solar_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power"))
