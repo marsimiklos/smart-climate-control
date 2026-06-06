@@ -271,6 +271,8 @@ class SmartClimateCoordinator:
             coordinator.cooling_temp = coordinator._get_config_value(CONF_COOLING_TEMP, DEFAULT_COOLING_TEMP)
             coordinator.cooling_eco_temp = coordinator._get_config_value(CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP)
             coordinator.min_runtime = entry.options.get("min_run_time", 0) * 60
+            
+            # Ventilation configs
             coordinator.vent_run_duration = coordinator._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
             coordinator.vent_auto_interval = coordinator._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
             coordinator.humidity_threshold = coordinator._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
@@ -356,16 +358,16 @@ class SmartClimateCoordinator:
             self.window_listener_remove()
             self.window_listener_remove = None
 
-        sensors = []
+        listen_sensors = []
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): window_sensors = [window_sensors]
-        if window_sensors: sensors.extend(window_sensors)
+        if window_sensors: listen_sensors.extend(window_sensors)
         
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
-        if door_sensor: sensors.append(door_sensor)
+        if door_sensor: listen_sensors.append(door_sensor)
         
-        if sensors:
-            self.window_listener_remove = async_track_state_change_event(self.hass, sensors, self._handle_window_state_change)
+        if listen_sensors:
+            self.window_listener_remove = async_track_state_change_event(self.hass, listen_sensors, self._handle_window_state_change)
 
     @callback
     async def _handle_window_state_change(self, event: Event):
@@ -445,9 +447,9 @@ class SmartClimateCoordinator:
 
     async def _get_max_humidity(self, sensor_conf: Union[str, List[str], None]) -> float:
         if not sensor_conf: return 0.0
-        sensors = sensor_conf if isinstance(sensor_conf, list) else [sensor_conf]
+        hum_sensors = sensor_conf if isinstance(sensor_conf, list) else [sensor_conf]
         max_hum = 0.0
-        for sensor_id in sensors:
+        for sensor_id in hum_sensors:
             val = await self._get_sensor_value(sensor_id)
             if val is not None and val > max_hum: max_hum = val
         return max_hum
@@ -849,24 +851,33 @@ class SmartClimateCoordinator:
         except (ValueError, TypeError): return default
     
     async def _check_window_status(self) -> bool:
-        open_sensors_ids, open_sensors_names = [], []
+        # Tiszta változók inicializálása
+        open_sensors_ids = []
+        open_sensors_names = []
+        
+        # Ablak szenzorok lekérése és biztonságos formázása
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
-        if isinstance(window_sensors, str): window_sensors = [window_sensors]
-        if window_sensors: sensors.extend(window_sensors)
+        if isinstance(window_sensors, str): 
+            window_sensors = [window_sensors]
         
+        # Ajtó szenzor lekérése
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
-        if door_sensor: sensors.append(door_sensor)
         
+        # Segédfüggvény a nyitott állapot ellenőrzésére
         def is_open(entity_id):
-            if not entity_id: return False
+            if not entity_id: 
+                return False
             st = self.hass.states.get(entity_id)
             return st and st.state in [STATE_ON, "true", STATE_OPEN]
 
+        # Ablakok ellenőrzése
         for sensor_id in window_sensors:
             if is_open(sensor_id):
                 open_sensors_ids.append(sensor_id)
                 st = self.hass.states.get(sensor_id)
                 open_sensors_names.append(st.name if st.name else sensor_id)
+                
+        # Ajtó ellenőrzése
         if is_open(door_sensor):
             open_sensors_ids.append(door_sensor)
             st = self.hass.states.get(door_sensor)
@@ -877,17 +888,28 @@ class SmartClimateCoordinator:
         
         if open_sensors_ids:
             self.window_cooldown_start = None
-            if self.window_open_start is None: self.window_open_start = now; return False
-            else: return ((now - self.window_open_start) / 60) > self.window_delay_minutes
+            if self.window_open_start is None: 
+                self.window_open_start = now
+                return False
+            else: 
+                return ((now - self.window_open_start) / 60) > self.window_delay_minutes
         else:
             if self.window_open_start is not None:
                 if ((now - self.window_open_start) / 60) < self.window_delay_minutes:
-                    self.window_open_start = None; self.window_cooldown_start = None; return False
-                if self.window_cooldown_start is None: self.window_cooldown_start = now
-                if ((now - self.window_cooldown_start) / 60) < self.window_delay_minutes: return True
-                else: self.window_open_start = None; self.window_cooldown_start = None; return False
+                    self.window_open_start = None
+                    self.window_cooldown_start = None
+                    return False
+                if self.window_cooldown_start is None: 
+                    self.window_cooldown_start = now
+                if ((now - self.window_cooldown_start) / 60) < self.window_delay_minutes: 
+                    return True
+                else: 
+                    self.window_open_start = None
+                    self.window_cooldown_start = None
+                    return False
             else:
-                self.window_cooldown_start = None; return False
+                self.window_cooldown_start = None
+                return False
 
     async def _check_sleep_status(self) -> None:
         bed_sensors = self.config.get(CONF_BED_SENSORS, [])
