@@ -22,6 +22,7 @@ from .const import (
     CONF_HUMIDITY_THRESHOLD, CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED,
     CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, CONF_ENABLE_VENTILATION,
     CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
+    CONF_SOLAR_DELAY,
     DEFAULT_COMFORT_TEMP, DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_DEADBAND, 
     DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR, DEFAULT_MAX_COMP_TEMP, 
     DEFAULT_MIN_COMP_TEMP, DEFAULT_COMFORT_OFFSET, DEFAULT_MIN_RUN_TIME, 
@@ -29,7 +30,7 @@ from .const import (
     DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD, 
     DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, DEFAULT_WINDOW_DELAY, 
     DEFAULT_COOLING_ECO_TEMP, DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, 
-    DEFAULT_CIRCULATE_FAN_SPEED, DEFAULT_ENABLE_VENTILATION
+    DEFAULT_CIRCULATE_FAN_SPEED, DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,14 +83,14 @@ class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict = {}
 
-        # --- Master Ventilation Toggle ---
         vent_enabled = self.config_entry.options.get(CONF_ENABLE_VENTILATION, self.config_entry.data.get(CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION))
         schema_dict[vol.Required(CONF_ENABLE_VENTILATION, default=vent_enabled)] = selector.BooleanSelector()
 
-        # --- Always visible general settings ---
         schema_dict[vol.Optional(CONF_COOLING_ECO_TEMP, default=get_opt(CONF_COOLING_ECO_TEMP) or DEFAULT_COOLING_ECO_TEMP)] = selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C"))
         schema_dict[vol.Optional(CONF_WINDOW_DELAY, default=get_opt(CONF_WINDOW_DELAY) or DEFAULT_WINDOW_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
         schema_dict[vol.Optional(CONF_MIN_RUN_TIME, default=get_opt(CONF_MIN_RUN_TIME) or DEFAULT_MIN_RUN_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=120, step=5, mode="slider", unit_of_measurement="min"))
+        
+        schema_dict[vol.Optional(CONF_SOLAR_DELAY, default=get_opt(CONF_SOLAR_DELAY) or DEFAULT_SOLAR_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
         
         win_val = get_list_opt(CONF_WINDOW_SENSORS)
         win_key = vol.Optional(CONF_WINDOW_SENSORS, default=win_val) if win_val else vol.Optional(CONF_WINDOW_SENSORS)
@@ -103,7 +104,6 @@ class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
         solar_key = vol.Optional(CONF_SOLAR_SENSOR, default=solar_val) if solar_val else vol.Optional(CONF_SOLAR_SENSOR)
         schema_dict[solar_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power"))
 
-        # --- Show ventilation/fan settings ONLY if ventilation is enabled ---
         if vent_enabled:
             schema_dict[vol.Optional(CONF_CIRCULATE_INTERVAL, default=get_opt(CONF_CIRCULATE_INTERVAL) or DEFAULT_CIRCULATE_INTERVAL)] = selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=12, step=1, mode="slider", unit_of_measurement="h"))
             schema_dict[vol.Optional(CONF_CIRCULATE_DURATION, default=get_opt(CONF_CIRCULATE_DURATION) or DEFAULT_CIRCULATE_DURATION)] = selector.NumberSelector(selector.NumberSelectorConfig(min=5, max=60, step=5, mode="slider", unit_of_measurement="min"))

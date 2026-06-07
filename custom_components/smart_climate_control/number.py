@@ -25,6 +25,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
         SmartClimateVentNumber(coordinator, config_entry, "free_cooling_cooldown", "Free Cooling Cooldown", 1, 12, "hours", step=1),
         SmartClimateSolarNumber(coordinator, config_entry, "solar_threshold", "Solar Threshold (W)", 0, 10000, "W", step=100),
         SmartClimateSolarNumber(coordinator, config_entry, "solar_offset", "Solar Offset (°C)", 0.0, 5.0, "°C", step=0.5, mode="slider"),
+        SmartClimateSolarNumber(coordinator, config_entry, "solar_delay_minutes", "Solar Drop Delay (min)", 0.0, 60.0, "min", step=1.0, mode="slider"),
     ])
 
 class SmartClimateTemperatureNumber(NumberEntity):
@@ -93,7 +94,13 @@ class SmartClimateSolarNumber(NumberEntity):
         self._attr_native_unit_of_measurement, self._attr_native_step = unit, step
         if mode: self._attr_mode = mode
         self._attr_device_info = {"identifiers": {(DOMAIN, config_entry.entry_id)}, "name": config_entry.data.get("name", "Smart Climate")}
-        self._attr_icon = "mdi:white-balance-sunny" if param_type == "solar_threshold" else "mdi:thermometer-chevron-up"
+        
+        if param_type == "solar_threshold":
+            self._attr_icon = "mdi:white-balance-sunny"
+        elif param_type == "solar_delay_minutes":
+            self._attr_icon = "mdi:timer-sand"
+        else:
+            self._attr_icon = "mdi:thermometer-chevron-up"
 
     @property
     def native_value(self): return getattr(self.coordinator, self._param_type)

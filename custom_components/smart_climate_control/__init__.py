@@ -36,7 +36,8 @@ from .const import (
     DEFAULT_AIROUT_DURATION, CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP,
     CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
     DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED,
-    CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION
+    CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION,
+    CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -214,6 +215,9 @@ class SmartClimateCoordinator:
         self.solar_sync_enabled = False
         self.solar_threshold = 2000.0 
         self.solar_offset = 1.5 
+        self.solar_delay_minutes = self._get_config_value(CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY)
+        self._solar_active_internally = False
+        self.solar_below_threshold_start = None
         
         # Periodic Circulation State
         self.circulate_enabled = False
@@ -250,7 +254,6 @@ class SmartClimateCoordinator:
     @property
     def window_delay_minutes(self) -> float: return self._get_config_value(CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY)
     
-    # Periodic Circulation Config
     @property
     def circulate_interval(self) -> float: return self._get_config_value(CONF_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_INTERVAL)
     @property
@@ -271,8 +274,8 @@ class SmartClimateCoordinator:
             coordinator.cooling_temp = coordinator._get_config_value(CONF_COOLING_TEMP, DEFAULT_COOLING_TEMP)
             coordinator.cooling_eco_temp = coordinator._get_config_value(CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP)
             coordinator.min_runtime = entry.options.get("min_run_time", 0) * 60
+            coordinator.solar_delay_minutes = coordinator._get_config_value(CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY)
             
-            # Ventilation configs
             coordinator.vent_run_duration = coordinator._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
             coordinator.vent_auto_interval = coordinator._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
             coordinator.humidity_threshold = coordinator._get_config_value(CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD)
@@ -313,6 +316,9 @@ class SmartClimateCoordinator:
             "solar_sync_enabled": self.solar_sync_enabled,
             "solar_threshold": self.solar_threshold,
             "solar_offset": self.solar_offset,
+            "solar_delay_minutes": self.solar_delay_minutes,
+            "solar_active_internally": self._solar_active_internally,
+            "solar_below_threshold_start": self.solar_below_threshold_start,
             "active_logic_mode": self.active_logic_mode,
             "current_hvac_mode": self.current_hvac_mode,
             "circulate_enabled": self.circulate_enabled,
@@ -345,6 +351,9 @@ class SmartClimateCoordinator:
             self.solar_sync_enabled = stored_data.get("solar_sync_enabled", False)
             self.solar_threshold = stored_data.get("solar_threshold", 2000.0)
             self.solar_offset = stored_data.get("solar_offset", 1.5)
+            self.solar_delay_minutes = stored_data.get("solar_delay_minutes", self._get_config_value(CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY))
+            self._solar_active_internally = stored_data.get("solar_active_internally", False)
+            self.solar_below_threshold_start = stored_data.get("solar_below_threshold_start")
             self.active_logic_mode = stored_data.get("active_logic_mode", "heat")
             self.current_hvac_mode = stored_data.get("current_hvac_mode", "auto")
             self.circulate_enabled = stored_data.get("circulate_enabled", False)
@@ -455,7 +464,6 @@ class SmartClimateCoordinator:
         return max_hum
 
     async def _check_ventilation_triggers(self):
-        # 1. Free Cooling Check
         if self.free_cooling_enabled and not self.airout_is_running:
             now_ts = time.time()
             cooldown_sec = self.free_cooling_cooldown * 3600
@@ -470,7 +478,6 @@ class SmartClimateCoordinator:
                         await self.async_save_state()
                         return
 
-        # 2. Humidity Check
         if time.time() > self.vent_humidity_cooldown_end:
             hum_a = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_A, None))
             hum_b = await self._get_max_humidity(self._get_config_value(CONF_HUMIDITY_SENSOR_B, None))
@@ -488,7 +495,6 @@ class SmartClimateCoordinator:
                 await self.start_ventilation_cycle(f"High Humidity ({max_hum:.1f}%)", start_phase=target_phase)
                 return
 
-        # 3. Automatic Scheduled Run Check
         if self.vent_auto_interval > 0:
             now_ts = time.time()
             if self.last_vent_auto_run is None:
@@ -622,7 +628,6 @@ class SmartClimateCoordinator:
         await self._turn_off_fans(all_fans)
 
     def _determine_base_temperature(self, is_cooling: bool) -> float:
-        """Select target temperature based on active mode."""
         comf = self.cooling_temp if is_cooling else self.comfort_temp
         eco = self.cooling_eco_temp if is_cooling else self.eco_temp
         
@@ -660,14 +665,23 @@ class SmartClimateCoordinator:
     
     async def _calculate_cooling_control(self, room_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool) -> tuple[str, Optional[float], str]:
         if window_open_stop: return "off", base_temp, "Window closed - Waiting restore" if self.window_cooldown_start else "Window/Door open"
+        
+        # Minimum runtime protection logic added for cooling
+        if self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Minimum runtime active"
+        
         if room_temp is None: return "off", base_temp, "No room temp data"
         
         turn_on_temp = base_temp + self.deadband_above
         turn_off_temp = base_temp - self.deadband_below
         
-        if room_temp >= turn_on_temp: return "on", base_temp, f"Cooling needed ({room_temp:.1f}°C >= {turn_on_temp:.1f}°C)" + (" [Solar Sync]" if is_solar_active else "")
-        elif room_temp <= turn_off_temp: return "off", base_temp, f"Too cold ({room_temp:.1f}°C <= {turn_off_temp:.1f}°C)"
-        else: return self.current_action, base_temp, "In deadband"
+        if room_temp >= turn_on_temp: 
+            self.last_heat_pump_start = time.time()
+            return "on", base_temp, f"Cooling needed ({room_temp:.1f}°C >= {turn_on_temp:.1f}°C)" + (" [Solar Sync]" if is_solar_active else "")
+        elif room_temp <= turn_off_temp: 
+            return "off", base_temp, f"Too cold ({room_temp:.1f}°C <= {turn_off_temp:.1f}°C)"
+        else: 
+            if self.current_action == "on" and self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Min runtime active"
+            return self.current_action, base_temp, "In deadband"
 
     async def async_update(self, now=None) -> None:
         try:
@@ -692,11 +706,37 @@ class SmartClimateCoordinator:
                     else:
                         self.active_logic_mode = "heat"
             
+            # --- Solar Sync Logic with Delay Timer ---
             solar_power = 0.0
             solar_sensor_id = self._get_config_value(CONF_SOLAR_SENSOR, None)
             if solar_sensor_id:
                 solar_power = await self._get_sensor_value(solar_sensor_id, 0.0)
-            is_solar_active = self.solar_sync_enabled and solar_power >= self.solar_threshold
+                
+            is_solar_active = False
+            if self.solar_sync_enabled:
+                if solar_power >= self.solar_threshold:
+                    self.solar_below_threshold_start = None
+                    self._solar_active_internally = True
+                    is_solar_active = True
+                else:
+                    if self._solar_active_internally:
+                        if self.solar_below_threshold_start is None:
+                            self.solar_below_threshold_start = time.time()
+                            is_solar_active = True
+                        else:
+                            elapsed_mins = (time.time() - self.solar_below_threshold_start) / 60
+                            if elapsed_mins >= self.solar_delay_minutes:
+                                self._solar_active_internally = False
+                                self.solar_below_threshold_start = None
+                                is_solar_active = False
+                            else:
+                                is_solar_active = True
+                    else:
+                        is_solar_active = False
+            else:
+                self._solar_active_internally = False
+                self.solar_below_threshold_start = None
+            # ----------------------------------------
 
             if self.active_logic_mode == "heat":
                 avg_house_temp = await self._get_sensor_value(self.config.get(CONF_AVERAGE_SENSOR))
@@ -745,6 +785,11 @@ class SmartClimateCoordinator:
                 self.current_target_temp = base_temp
                 action, temperature, reason = await self._calculate_cooling_control(room_temp, base_temp, window_open_stop, is_solar_active)
                 
+                # Check cooling min runtime remaining for UI status display
+                if self.last_heat_pump_start is not None and action == "on":
+                    remaining = max(0, self.min_runtime - (time.time() - self.last_heat_pump_start))
+                    if remaining > 0: self.min_runtime_remaining_minutes = int(remaining / 60)
+
                 # --- Periodic Fan Circulation Logic ---
                 if action == "on":
                     self.last_cooling_active_time = time.time()
@@ -851,33 +896,27 @@ class SmartClimateCoordinator:
         except (ValueError, TypeError): return default
     
     async def _check_window_status(self) -> bool:
-        # Tiszta változók inicializálása
         open_sensors_ids = []
         open_sensors_names = []
         
-        # Ablak szenzorok lekérése és biztonságos formázása
         window_sensors = self._get_config_value(CONF_WINDOW_SENSORS, [])
         if isinstance(window_sensors, str): 
             window_sensors = [window_sensors]
         
-        # Ajtó szenzor lekérése
         door_sensor = self._get_config_value(CONF_DOOR_SENSOR, None)
         
-        # Segédfüggvény a nyitott állapot ellenőrzésére
         def is_open(entity_id):
             if not entity_id: 
                 return False
             st = self.hass.states.get(entity_id)
             return st and st.state in [STATE_ON, "true", STATE_OPEN]
 
-        # Ablakok ellenőrzése
         for sensor_id in window_sensors:
             if is_open(sensor_id):
                 open_sensors_ids.append(sensor_id)
                 st = self.hass.states.get(sensor_id)
                 open_sensors_names.append(st.name if st.name else sensor_id)
                 
-        # Ajtó ellenőrzése
         if is_open(door_sensor):
             open_sensors_ids.append(door_sensor)
             st = self.hass.states.get(door_sensor)

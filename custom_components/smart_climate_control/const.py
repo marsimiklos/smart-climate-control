@@ -27,7 +27,6 @@ CONF_MIN_RUN_TIME = "min_run_time"
 CONF_LOW_TEMP_THRESHOLD = "low_temp_threshold"
 CONF_SAFETY_CUTOFF = "safety_cutoff"
 
-# --- Ventilation Feature Toggle ---
 CONF_ENABLE_VENTILATION = "enable_ventilation"
 
 CONF_FAN_GROUP_A = "fan_group_a"
@@ -42,8 +41,8 @@ CONF_VENT_AUTO_INTERVAL = "vent_auto_interval"
 CONF_VENT_FAN_SPEED = "vent_fan_speed"
 CONF_AIROUT_DURATION = "airout_duration"
 CONF_SOLAR_SENSOR = "solar_sensor"
+CONF_SOLAR_DELAY = "solar_delay"
 
-# --- Circulation Configs ---
 CONF_CIRCULATE_INTERVAL = "circulate_interval"
 CONF_CIRCULATE_DURATION = "circulate_duration"
 CONF_CIRCULATE_FAN_SPEED = "circulate_fan_speed"
@@ -72,6 +71,7 @@ DEFAULT_HUMIDITY_THRESHOLD = 60.0
 DEFAULT_VENT_AUTO_INTERVAL = 12
 DEFAULT_VENT_FAN_SPEED = 100
 DEFAULT_AIROUT_DURATION = 30
+DEFAULT_SOLAR_DELAY = 10.0
 
 DEFAULT_CIRCULATE_INTERVAL = 2
 DEFAULT_CIRCULATE_DURATION = 15
