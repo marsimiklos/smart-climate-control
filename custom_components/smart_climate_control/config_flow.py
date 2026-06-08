@@ -15,22 +15,23 @@ from .const import (
     CONF_HEAT_PUMP_CONTACT, CONF_COMFORT_TEMP, CONF_ECO_TEMP,
     CONF_BOOST_TEMP, CONF_DEADBAND_BELOW, CONF_DEADBAND_ABOVE,
     CONF_MAX_HOUSE_TEMP, CONF_WEATHER_COMP_FACTOR, CONF_MAX_COMP_TEMP,
-    CONF_MIN_COMP_TEMP, CONF_COMFORT_OFFSET, CONF_MIN_RUN_TIME,
+    CONF_MIN_COMP_TEMP, CONF_COMFORT_OFFSET, CONF_MIN_RUN_TIME, CONF_MIN_OFF_TIME, CONF_BOOT_DELAY,
     CONF_LOW_TEMP_THRESHOLD, CONF_SAFETY_CUTOFF, CONF_FAN_GROUP_A,
     CONF_FAN_GROUP_B, CONF_HUMIDITY_SENSOR_A, CONF_HUMIDITY_SENSOR_B,
     CONF_VENT_CYCLE_TIME, CONF_VENT_DURATION, CONF_VENT_MAX_DURATION,
     CONF_HUMIDITY_THRESHOLD, CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED,
     CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, CONF_ENABLE_VENTILATION,
     CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
-    CONF_SOLAR_DELAY,
+    CONF_SOLAR_DELAY, CONF_SOLAR_MAX_OFFSET, CONF_SOLAR_SCALING_WATT, CONF_CONSUMPTION_SENSOR, CONF_CONSUMPTION_THRESHOLD,
     DEFAULT_COMFORT_TEMP, DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_DEADBAND, 
     DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR, DEFAULT_MAX_COMP_TEMP, 
-    DEFAULT_MIN_COMP_TEMP, DEFAULT_COMFORT_OFFSET, DEFAULT_MIN_RUN_TIME, 
+    DEFAULT_MIN_COMP_TEMP, DEFAULT_COMFORT_OFFSET, DEFAULT_MIN_RUN_TIME, DEFAULT_MIN_OFF_TIME, DEFAULT_BOOT_DELAY,
     DEFAULT_LOW_TEMP_THRESHOLD, DEFAULT_SAFETY_CUTOFF, DEFAULT_VENT_CYCLE_TIME, 
     DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD, 
     DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, DEFAULT_WINDOW_DELAY, 
     DEFAULT_COOLING_ECO_TEMP, DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, 
-    DEFAULT_CIRCULATE_FAN_SPEED, DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY
+    DEFAULT_CIRCULATE_FAN_SPEED, DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY, DEFAULT_SOLAR_MAX_OFFSET, DEFAULT_SOLAR_SCALING_WATT,
+    DEFAULT_CONSUMPTION_THRESHOLD
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_HEAT_PUMP_CONTACT): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
             vol.Optional(CONF_PRESENCE_TRACKER): selector.EntitySelector(selector.EntitySelectorConfig()),
             vol.Optional(CONF_SOLAR_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power")),
+            vol.Optional(CONF_CONSUMPTION_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power")),
         })
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
@@ -88,10 +90,18 @@ class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict[vol.Optional(CONF_COOLING_ECO_TEMP, default=get_opt(CONF_COOLING_ECO_TEMP) or DEFAULT_COOLING_ECO_TEMP)] = selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C"))
         schema_dict[vol.Optional(CONF_WINDOW_DELAY, default=get_opt(CONF_WINDOW_DELAY) or DEFAULT_WINDOW_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
+        
+        # System protections
+        schema_dict[vol.Optional(CONF_BOOT_DELAY, default=get_opt(CONF_BOOT_DELAY) or DEFAULT_BOOT_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10, step=1, mode="slider", unit_of_measurement="min"))
         schema_dict[vol.Optional(CONF_MIN_RUN_TIME, default=get_opt(CONF_MIN_RUN_TIME) or DEFAULT_MIN_RUN_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=120, step=5, mode="slider", unit_of_measurement="min"))
+        schema_dict[vol.Optional(CONF_MIN_OFF_TIME, default=get_opt(CONF_MIN_OFF_TIME) or DEFAULT_MIN_OFF_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
         
+        # Solar Configs
         schema_dict[vol.Optional(CONF_SOLAR_DELAY, default=get_opt(CONF_SOLAR_DELAY) or DEFAULT_SOLAR_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
-        
+        schema_dict[vol.Optional(CONF_SOLAR_MAX_OFFSET, default=get_opt(CONF_SOLAR_MAX_OFFSET) or DEFAULT_SOLAR_MAX_OFFSET)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10.0, step=0.5, mode="slider", unit_of_measurement="°C"))
+        schema_dict[vol.Optional(CONF_SOLAR_SCALING_WATT, default=get_opt(CONF_SOLAR_SCALING_WATT) or DEFAULT_SOLAR_SCALING_WATT)] = selector.NumberSelector(selector.NumberSelectorConfig(min=100, max=5000, step=100, mode="slider", unit_of_measurement="W"))
+        schema_dict[vol.Optional(CONF_CONSUMPTION_THRESHOLD, default=get_opt(CONF_CONSUMPTION_THRESHOLD) or DEFAULT_CONSUMPTION_THRESHOLD)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10000, step=100, mode="slider", unit_of_measurement="W"))
+
         win_val = get_list_opt(CONF_WINDOW_SENSORS)
         win_key = vol.Optional(CONF_WINDOW_SENSORS, default=win_val) if win_val else vol.Optional(CONF_WINDOW_SENSORS)
         schema_dict[win_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", multiple=True))
@@ -103,6 +113,10 @@ class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
         solar_val = get_opt(CONF_SOLAR_SENSOR)
         solar_key = vol.Optional(CONF_SOLAR_SENSOR, default=solar_val) if solar_val else vol.Optional(CONF_SOLAR_SENSOR)
         schema_dict[solar_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power"))
+
+        cons_val = get_opt(CONF_CONSUMPTION_SENSOR)
+        cons_key = vol.Optional(CONF_CONSUMPTION_SENSOR, default=cons_val) if cons_val else vol.Optional(CONF_CONSUMPTION_SENSOR)
+        schema_dict[cons_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power"))
 
         if vent_enabled:
             schema_dict[vol.Optional(CONF_CIRCULATE_INTERVAL, default=get_opt(CONF_CIRCULATE_INTERVAL) or DEFAULT_CIRCULATE_INTERVAL)] = selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=12, step=1, mode="slider", unit_of_measurement="h"))
