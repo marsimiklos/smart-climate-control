@@ -19,7 +19,6 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
         SmartClimateLogicModeSensor(coordinator, config_entry),
     ]
     
-    # Only load ventilation sensor if the feature is enabled in options
     if getattr(coordinator, "has_ventilation", True):
         sensors.append(SmartClimateVentStatusSensor(coordinator, config_entry))
         
@@ -84,7 +83,8 @@ class SmartClimateTargetSensor(SmartClimateBaseSensor):
         
     @property
     def state(self): 
-        return self.coordinator.current_target_temp
+        target = self.coordinator.current_target_temp
+        return round(target, 1) if target is not None else None
 
 class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
     def __init__(self, coordinator, config_entry):

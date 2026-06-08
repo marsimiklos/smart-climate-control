@@ -32,13 +32,17 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
         if not room_sensor: return None
         state = self.hass.states.get(room_sensor)
         if state and state.state not in ["unknown", "unavailable"]:
-            try: return float(state.state)
-            except ValueError: return None
+            try: 
+                # Round to 1 decimal place to prevent long float values in UI
+                return round(float(state.state), 1)
+            except ValueError: 
+                return None
         return None
 
     @property
     def target_temperature(self) -> Optional[float]:
-        return self.coordinator.current_target_temp
+        target = self.coordinator.current_target_temp
+        return round(target, 1) if target is not None else None
 
     @property
     def hvac_mode(self) -> HVACMode:

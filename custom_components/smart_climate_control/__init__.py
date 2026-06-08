@@ -24,7 +24,7 @@ from .const import (
     CONF_DEADBAND_BELOW, CONF_DEADBAND_ABOVE, CONF_MAX_HOUSE_TEMP,
     CONF_WEATHER_COMP_FACTOR, CONF_MAX_COMP_TEMP, CONF_MIN_COMP_TEMP,
     CONF_PRESENCE_TRACKER, CONF_LOW_TEMP_THRESHOLD, CONF_SAFETY_CUTOFF,
-    CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME,  # <--- EZ HIÁNYZOTT!
+    CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME,
     DEFAULT_COMFORT_TEMP, DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_COOLING_TEMP,
     DEFAULT_DEADBAND, DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR,
     DEFAULT_MAX_COMP_TEMP, DEFAULT_MIN_COMP_TEMP, DEFAULT_LOW_TEMP_THRESHOLD,
@@ -39,9 +39,9 @@ from .const import (
     DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED,
     CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION,
     CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY,
+    CONF_SOLAR_BASE_THRESHOLD, DEFAULT_SOLAR_BASE_THRESHOLD,
     CONF_CONSUMPTION_SENSOR, CONF_CONSUMPTION_THRESHOLD, DEFAULT_CONSUMPTION_THRESHOLD,
-    CONF_MIN_OFF_TIME, DEFAULT_MIN_OFF_TIME, CONF_BOOT_DELAY, DEFAULT_BOOT_DELAY,
-    CONF_SOLAR_MAX_OFFSET, DEFAULT_SOLAR_MAX_OFFSET, CONF_SOLAR_SCALING_WATT, DEFAULT_SOLAR_SCALING_WATT
+    CONF_MIN_OFF_TIME, DEFAULT_MIN_OFF_TIME, CONF_BOOT_DELAY, DEFAULT_BOOT_DELAY
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -220,13 +220,12 @@ class SmartClimateCoordinator:
         
         # Solar Sync State
         self.solar_sync_enabled = False
+        self.solar_base_threshold = self._get_config_value(CONF_SOLAR_BASE_THRESHOLD, DEFAULT_SOLAR_BASE_THRESHOLD)
         self.solar_threshold = 2000.0 
         self.solar_offset = 1.5 
-        self.solar_max_offset = self._get_config_value(CONF_SOLAR_MAX_OFFSET, DEFAULT_SOLAR_MAX_OFFSET)
-        self.solar_scaling_watt = self._get_config_value(CONF_SOLAR_SCALING_WATT, DEFAULT_SOLAR_SCALING_WATT)
         self.solar_delay_minutes = self._get_config_value(CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY)
         self.consumption_threshold = self._get_config_value(CONF_CONSUMPTION_THRESHOLD, DEFAULT_CONSUMPTION_THRESHOLD)
-        self._solar_active_internally = False
+        self._solar_state = "none" # Lehet: "none", "base", "offset"
         self.solar_below_threshold_start = None
         
         # Periodic Circulation State
@@ -288,10 +287,9 @@ class SmartClimateCoordinator:
             coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
             coordinator.cooling_temp = coordinator._get_config_value(CONF_COOLING_TEMP, DEFAULT_COOLING_TEMP)
             coordinator.cooling_eco_temp = coordinator._get_config_value(CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP)
+            coordinator.solar_base_threshold = coordinator._get_config_value(CONF_SOLAR_BASE_THRESHOLD, DEFAULT_SOLAR_BASE_THRESHOLD)
             coordinator.solar_delay_minutes = coordinator._get_config_value(CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY)
             coordinator.consumption_threshold = coordinator._get_config_value(CONF_CONSUMPTION_THRESHOLD, DEFAULT_CONSUMPTION_THRESHOLD)
-            coordinator.solar_max_offset = coordinator._get_config_value(CONF_SOLAR_MAX_OFFSET, DEFAULT_SOLAR_MAX_OFFSET)
-            coordinator.solar_scaling_watt = coordinator._get_config_value(CONF_SOLAR_SCALING_WATT, DEFAULT_SOLAR_SCALING_WATT)
             
             coordinator.vent_run_duration = coordinator._get_config_value(CONF_VENT_DURATION, DEFAULT_VENT_DURATION)
             coordinator.vent_auto_interval = coordinator._get_config_value(CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL)
@@ -332,13 +330,12 @@ class SmartClimateCoordinator:
             "free_cooling_max_duration": self.free_cooling_max_duration,
             "free_cooling_cooldown": self.free_cooling_cooldown,
             "solar_sync_enabled": self.solar_sync_enabled,
+            "solar_base_threshold": self.solar_base_threshold,
             "solar_threshold": self.solar_threshold,
             "solar_offset": self.solar_offset,
-            "solar_max_offset": self.solar_max_offset,
-            "solar_scaling_watt": self.solar_scaling_watt,
             "solar_delay_minutes": self.solar_delay_minutes,
             "consumption_threshold": self.consumption_threshold,
-            "solar_active_internally": self._solar_active_internally,
+            "solar_state": self._solar_state,
             "solar_below_threshold_start": self.solar_below_threshold_start,
             "active_logic_mode": self.active_logic_mode,
             "current_hvac_mode": self.current_hvac_mode,
@@ -371,13 +368,12 @@ class SmartClimateCoordinator:
             self.free_cooling_max_duration = stored_data.get("free_cooling_max_duration", self._get_config_value("free_cooling_max_duration", 60))
             self.free_cooling_cooldown = stored_data.get("free_cooling_cooldown", self._get_config_value("free_cooling_cooldown", 3))
             self.solar_sync_enabled = stored_data.get("solar_sync_enabled", False)
+            self.solar_base_threshold = stored_data.get("solar_base_threshold", self._get_config_value(CONF_SOLAR_BASE_THRESHOLD, DEFAULT_SOLAR_BASE_THRESHOLD))
             self.solar_threshold = stored_data.get("solar_threshold", 2000.0)
             self.solar_offset = stored_data.get("solar_offset", 1.5)
-            self.solar_max_offset = stored_data.get("solar_max_offset", self._get_config_value(CONF_SOLAR_MAX_OFFSET, DEFAULT_SOLAR_MAX_OFFSET))
-            self.solar_scaling_watt = stored_data.get("solar_scaling_watt", self._get_config_value(CONF_SOLAR_SCALING_WATT, DEFAULT_SOLAR_SCALING_WATT))
             self.solar_delay_minutes = stored_data.get("solar_delay_minutes", self._get_config_value(CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY))
             self.consumption_threshold = stored_data.get("consumption_threshold", self._get_config_value(CONF_CONSUMPTION_THRESHOLD, DEFAULT_CONSUMPTION_THRESHOLD))
-            self._solar_active_internally = stored_data.get("solar_active_internally", False)
+            self._solar_state = stored_data.get("solar_state", "none")
             self.solar_below_threshold_start = stored_data.get("solar_below_threshold_start")
             self.active_logic_mode = stored_data.get("active_logic_mode", "heat")
             self.current_hvac_mode = stored_data.get("current_hvac_mode", "auto")
@@ -669,7 +665,7 @@ class SmartClimateCoordinator:
         if self.force_eco_mode or self.sleep_mode_active: return eco
         return comf
     
-    async def _calculate_heating_control(self, room_temp: Optional[float], outside_temp: float, avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool, applied_solar_offset: float) -> tuple[str, Optional[float], str]:
+    async def _calculate_heating_control(self, room_temp: Optional[float], outside_temp: float, avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool, applied_solar_offset: float) -> tuple[str, Optional[float], str]:
         if window_open_stop: return "off", base_temp, "Window closed - Waiting restore" if self.window_cooldown_start else "Window/Door open"
         if self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Minimum runtime active"
         if self.last_heat_pump_stop and (time.time() - self.last_heat_pump_stop) < self.min_off_time: 
@@ -685,14 +681,16 @@ class SmartClimateCoordinator:
                 
         if room_temp is None: return "off", base_temp, "No room temp data"
         
-        base_temp += applied_solar_offset
+        if is_solar_active:
+            target = base_temp + applied_solar_offset
+            offset_msg = f" (+{applied_solar_offset:.1f}°C)" if applied_solar_offset > 0 else " (Normál Hőfok)"
+            return "on", target, f"Solar Sync Aktív{offset_msg}"
+            
         turn_on_temp = base_temp - self.deadband_below
         turn_off_temp = base_temp + self.deadband_above
-        
-        solar_msg = f" [Solar Sync: +{applied_solar_offset:.1f}°C]" if applied_solar_offset > 0 else ""
 
         if room_temp <= turn_on_temp:
-            return "on", base_temp, f"Heating needed ({room_temp:.1f}°C <= {turn_on_temp:.1f}°C){solar_msg}"
+            return "on", base_temp, f"Heating needed ({room_temp:.1f}°C <= {turn_on_temp:.1f}°C)"
         elif room_temp >= turn_off_temp:
             if self.is_comfort_mode_active and outside_temp < self.low_temp_threshold:
                 if room_temp >= (turn_off_temp + self.safety_cutoff_offset): return "off", base_temp, f"Overheating protection ({room_temp:.1f}°C)"
@@ -702,7 +700,7 @@ class SmartClimateCoordinator:
             if self.current_action == "on" and self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Min runtime active"
             return self.current_action, base_temp, "In deadband"
     
-    async def _calculate_cooling_control(self, room_temp: Optional[float], base_temp: float, window_open_stop: bool, applied_solar_offset: float) -> tuple[str, Optional[float], str]:
+    async def _calculate_cooling_control(self, room_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool, applied_solar_offset: float) -> tuple[str, Optional[float], str]:
         if window_open_stop: return "off", base_temp, "Window closed - Waiting restore" if self.window_cooldown_start else "Window/Door open"
         
         if self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Minimum runtime active"
@@ -711,12 +709,13 @@ class SmartClimateCoordinator:
         
         if room_temp is None: return "off", base_temp, "No room temp data"
         
+        if is_solar_active:
+            target = base_temp - applied_solar_offset
+            offset_msg = f" (-{applied_solar_offset:.1f}°C)" if applied_solar_offset > 0 else " (Normál Hőfok)"
+            return "on", target, f"Solar Sync Aktív{offset_msg}"
+            
         turn_on_temp = base_temp + self.deadband_above
         turn_off_temp = base_temp - self.deadband_below
-        
-        if applied_solar_offset > 0:
-            adjusted_base = base_temp - applied_solar_offset
-            return "on", adjusted_base, f"Solar Sync Active (Dynamic Tempering at {adjusted_base:.1f}°C)"
         
         if room_temp >= turn_on_temp: 
             return "on", base_temp, f"Cooling needed ({room_temp:.1f}°C >= {turn_on_temp:.1f}°C)"
@@ -759,7 +758,7 @@ class SmartClimateCoordinator:
                         else:
                             self.active_logic_mode = "heat"
                 
-                # --- Solar Sync Logic with Dynamic Tempering ---
+                # --- Two-Level Solar Sync Logic ---
                 solar_power = 0.0
                 solar_sensor_id = self._get_config_value(CONF_SOLAR_SENSOR, None)
                 if solar_sensor_id:
@@ -772,43 +771,30 @@ class SmartClimateCoordinator:
                     consumption_power = await self._get_sensor_value(consumption_sensor_id, 0.0)
                     has_consumption_sensor = True
                     
-                is_solar_active = False
                 if self.solar_sync_enabled:
-                    solar_condition_met = solar_power >= self.solar_threshold
-                    consumption_condition_met = (consumption_power <= self.consumption_threshold) if has_consumption_sensor else True
-                    
-                    if solar_condition_met and consumption_condition_met:
+                    # Szint 2 (Magas termelés és alacsony fogyasztás = klíma indul extra hűtéssel)
+                    if solar_power >= self.solar_threshold and (consumption_power <= self.consumption_threshold if has_consumption_sensor else True):
+                        self._solar_state = "offset"
                         self.solar_below_threshold_start = None
-                        self._solar_active_internally = True
-                        is_solar_active = True
+                    # Szint 1 (Közepes termelés = klíma indul normál hőmérsékleten)
+                    elif solar_power >= self.solar_base_threshold:
+                        self._solar_state = "base"
+                        self.solar_below_threshold_start = None
                     else:
-                        if self._solar_active_internally:
+                        if self._solar_state != "none":
                             if self.solar_below_threshold_start is None:
                                 self.solar_below_threshold_start = time.time()
-                                is_solar_active = True
                             else:
                                 elapsed_mins = (time.time() - self.solar_below_threshold_start) / 60
                                 if elapsed_mins >= self.solar_delay_minutes:
-                                    self._solar_active_internally = False
+                                    self._solar_state = "none"
                                     self.solar_below_threshold_start = None
-                                    is_solar_active = False
-                                else:
-                                    is_solar_active = True
-                        else:
-                            is_solar_active = False
                 else:
-                    self._solar_active_internally = False
+                    self._solar_state = "none"
                     self.solar_below_threshold_start = None
 
-                # Calculate Dynamic Offset
-                applied_solar_offset = 0.0
-                if is_solar_active:
-                    extra_solar = max(0, solar_power - self.solar_threshold)
-                    scaling = self.solar_scaling_watt
-                    calc_offset = self.solar_offset
-                    if scaling > 0:
-                        calc_offset += extra_solar / scaling
-                    applied_solar_offset = min(calc_offset, self.solar_max_offset)
+                is_solar_active = self._solar_state in ["base", "offset"]
+                applied_solar_offset = self.solar_offset if self._solar_state == "offset" else 0.0
                 # ----------------------------------------
 
                 self.min_runtime_remaining_minutes = 0
@@ -821,7 +807,7 @@ class SmartClimateCoordinator:
                     base_temp = self._determine_base_temperature(False)
                     
                     action, temperature, reason = await self._calculate_heating_control(
-                        room_temp, outside_temp, avg_house_temp, base_temp, window_open_stop, applied_solar_offset
+                        room_temp, outside_temp, avg_house_temp, base_temp, window_open_stop, is_solar_active, applied_solar_offset
                     )
                     
                     self.current_target_temp = temperature if temperature is not None else base_temp
@@ -829,7 +815,7 @@ class SmartClimateCoordinator:
                     self.comfort_offset_applied = 0.0
                     is_temperating = "Temperating" in reason
                     
-                    if self.active_logic_mode == "heat" and action == "on" and temperature is not None:
+                    if self.active_logic_mode == "heat" and action == "on" and temperature is not None and not is_solar_active:
                         if not is_temperating and self.is_comfort_mode_active:
                             offset_value = self._get_config_value("comfort_temp_offset", 0.0)
                             if offset_value > 0:
@@ -857,7 +843,7 @@ class SmartClimateCoordinator:
                     
                     base_temp = self._determine_base_temperature(True)
                     
-                    action, temperature, reason = await self._calculate_cooling_control(room_temp, base_temp, window_open_stop, applied_solar_offset)
+                    action, temperature, reason = await self._calculate_cooling_control(room_temp, base_temp, window_open_stop, is_solar_active, applied_solar_offset)
                     self.current_target_temp = temperature if temperature is not None else base_temp
                     
                     if self.last_heat_pump_start is not None and action == "on":

@@ -23,10 +23,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
         SmartClimateVentNumber(coordinator, config_entry, "airout_duration", "Airout Max Duration", 5, 120, "min", step=5),
         SmartClimateVentNumber(coordinator, config_entry, "free_cooling_max_duration", "Free Cooling Max Duration", 10, 180, "min", step=10),
         SmartClimateVentNumber(coordinator, config_entry, "free_cooling_cooldown", "Free Cooling Cooldown", 1, 12, "hours", step=1),
-        SmartClimateSolarNumber(coordinator, config_entry, "solar_threshold", "Solar Threshold (W)", 0, 10000, "W", step=100),
-        SmartClimateSolarNumber(coordinator, config_entry, "solar_offset", "Base Solar Offset (°C)", 0.0, 5.0, "°C", step=0.5, mode="slider"),
-        SmartClimateSolarNumber(coordinator, config_entry, "solar_max_offset", "Max Solar Offset (°C)", 0.0, 10.0, "°C", step=0.5, mode="slider"),
-        SmartClimateSolarNumber(coordinator, config_entry, "solar_scaling_watt", "Solar Scaling per °C (W)", 100, 5000, "W", step=100, mode="slider"),
+        SmartClimateSolarNumber(coordinator, config_entry, "solar_base_threshold", "Solar Base Run (W)", 0, 10000, "W", step=100),
+        SmartClimateSolarNumber(coordinator, config_entry, "solar_threshold", "Solar Offset Run (W)", 0, 10000, "W", step=100),
+        SmartClimateSolarNumber(coordinator, config_entry, "solar_offset", "Solar Max Offset (°C)", 0.0, 5.0, "°C", step=0.5, mode="slider"),
         SmartClimateSolarNumber(coordinator, config_entry, "solar_delay_minutes", "Solar Drop Delay (min)", 0.0, 60.0, "min", step=1.0, mode="slider"),
         SmartClimateSolarNumber(coordinator, config_entry, "consumption_threshold", "Consumption Threshold (W)", 0, 10000, "W", step=100),
     ])
@@ -98,7 +97,7 @@ class SmartClimateSolarNumber(NumberEntity):
         if mode: self._attr_mode = mode
         self._attr_device_info = {"identifiers": {(DOMAIN, config_entry.entry_id)}, "name": config_entry.data.get("name", "Smart Climate")}
         
-        if "solar" in param_type and "delay" not in param_type:
+        if "solar_threshold" in param_type or "solar_base" in param_type:
             self._attr_icon = "mdi:white-balance-sunny"
         elif param_type == "solar_delay_minutes":
             self._attr_icon = "mdi:timer-sand"
