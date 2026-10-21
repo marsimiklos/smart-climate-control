@@ -32,6 +32,7 @@ from .const import (
     DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY, DEFAULT_SOLAR_BASE_THRESHOLD,
     DEFAULT_CONSUMPTION_THRESHOLD,
     CONF_SCHEDULE, CONF_PREHEAT_MAX_MINUTES, CONF_HEAT_PUMP_POWER_SENSOR, CONF_RATED_POWER,
+    CONF_ARRIVAL_ZONE,
     DEFAULT_PREHEAT_MAX_MINUTES, DEFAULT_RATED_POWER,
 )
 
@@ -69,6 +70,7 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_SOLAR_SENSOR): _entity(domain="sensor", device_class="power"),
             vol.Optional(CONF_CONSUMPTION_SENSOR): _entity(domain="sensor", device_class="power"),
             vol.Optional(CONF_SCHEDULE): _entity(domain="schedule"),
+            vol.Optional(CONF_ARRIVAL_ZONE): _entity(domain="zone"),
             vol.Optional(CONF_HEAT_PUMP_POWER_SENSOR): _entity(domain="sensor", device_class="power"),
         })
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -126,6 +128,7 @@ _BASE_ENTITIES = [
     (CONF_SOLAR_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
     (CONF_CONSUMPTION_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
     (CONF_SCHEDULE, False, {"domain": "schedule"}),
+    (CONF_ARRIVAL_ZONE, False, {"domain": "zone"}),
     (CONF_HEAT_PUMP_POWER_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
 ]
 

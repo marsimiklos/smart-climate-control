@@ -57,6 +57,7 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "solar_sync_active": self.coordinator.solar_sync_enabled,
             "solar_state": self.coordinator._solar_state,
             "away": self.coordinator.is_away,
+            "arriving": self.coordinator.arriving,
             "sleep": self.coordinator.sleep_mode_active,
             "force_heating": self.coordinator.force_heating,
             "preheat_active": self.coordinator.preheat_active,
@@ -83,6 +84,8 @@ class SmartClimateModeSensor(SmartClimateBaseSensor):
             return "Force Eco"
         if coordinator.sleep_mode_active:
             return "Sleep Eco"
+        if coordinator.arriving:
+            return "Arrival Preheat"
         if coordinator.is_away:
             return "Away Eco"
         if coordinator.schedule_eco_active:

@@ -18,7 +18,8 @@
           "solar_sensor": "Solar production sensor (W)",
           "consumption_sensor": "House consumption sensor (W)",
           "schedule": "Schedule (comfort while on, eco while off, pre-heats before it turns on)",
-          "heat_pump_power_sensor": "Heat pump power sensor (W, for energy estimate)"
+          "heat_pump_power_sensor": "Heat pump power sensor (W, for energy estimate)",
+          "arrival_zone": "Arrival zone (e.g. the town: comfort as soon as someone enters it while nobody is home)"
         }
       }
     },
@@ -75,7 +76,8 @@
           "schedule": "Schedule (comfort while on, eco while off, pre-heats before it turns on)",
           "heat_pump_power_sensor": "Heat pump power sensor (W, for energy estimate)",
           "preheat_max_minutes": "Maximum pre-heat time",
-          "rated_power": "Heat pump average power when running (W, if no power sensor)"
+          "rated_power": "Heat pump average power when running (W, if no power sensor)",
+          "arrival_zone": "Arrival zone (e.g. the town: comfort as soon as someone enters it while nobody is home)"
         }
       }
     }

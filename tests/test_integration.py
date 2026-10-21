@@ -232,3 +232,56 @@ async def test_statistics_and_learning_are_exposed_and_persisted(hass: HomeAssis
     assert restored.thermal.rate_for(5.0) == 2.5
     assert restored.stats.today.cycles == 1
     await restored.async_shutdown()
+
+
+async def _setup_arrival(hass: HomeAssistant, zone_count: str, person_state: str, **extra):
+    hass.states.async_set("person.me", person_state)
+    hass.states.async_set("zone.town", zone_count, {"persons": ["person.me"] if zone_count != "0" else []})
+    return await _setup(hass, **{CONF_PRESENCE_TRACKER: "person.me", "arrival_zone": "zone.town", **extra})
+
+
+async def test_arrival_zone_switches_back_to_comfort(hass: HomeAssistant):
+    _, coordinator, _ = await _setup_arrival(hass, "0", "not_home")
+    assert coordinator.arriving is False
+    assert coordinator._determine_base_temperature(False) == coordinator.eco_temp
+
+    hass.states.async_set("zone.town", "1", {"persons": ["person.me"]})
+    assert coordinator.arriving is True
+    assert coordinator._determine_base_temperature(False) == coordinator.comfort_temp
+    assert coordinator.is_comfort_mode_active is True
+
+
+async def test_arrival_beats_a_schedule_that_says_eco(hass: HomeAssistant):
+    hass.states.async_set("schedule.home", "off", {"next_event": dt_util.utcnow() + timedelta(hours=9)})
+    _, coordinator, _ = await _setup_arrival(hass, "1", "not_home", schedule="schedule.home")
+    hass.states.async_set(ROOM, "17.0", {"device_class": "temperature"})
+    await coordinator.async_update()
+    assert coordinator.schedule_eco_active is False
+    assert coordinator._determine_base_temperature(False) == coordinator.comfort_temp
+
+
+async def test_zone_is_ignored_when_someone_is_home(hass: HomeAssistant):
+    """A partner in town must not heat up an occupied house at night."""
+    hass.states.async_set("schedule.home", "off", {"next_event": dt_util.utcnow() + timedelta(hours=9)})
+    _, coordinator, _ = await _setup_arrival(hass, "1", "home", schedule="schedule.home")
+    await coordinator.async_update()
+    assert coordinator.arriving is False
+    assert coordinator.schedule_eco_active is True
+    assert coordinator._determine_base_temperature(False) == coordinator.eco_temp
+
+
+async def test_force_eco_still_wins_over_arrival(hass: HomeAssistant):
+    _, coordinator, _ = await _setup_arrival(hass, "1", "not_home")
+    coordinator.force_eco_mode = True
+    assert coordinator._determine_base_temperature(False) == coordinator.eco_temp
+
+
+async def test_person_in_another_zone_counts_as_away(hass: HomeAssistant):
+    """A person in a named zone has that zone's name as state, not "not_home"."""
+    _, coordinator, _ = await _setup_arrival(hass, "1", "Town")
+    assert coordinator.is_away is True
+    assert coordinator.arriving is True
+    hass.states.async_set("person.me", "home")
+    assert coordinator.is_away is False
+    hass.states.async_set("person.me", "unavailable")
+    assert coordinator.is_away is False

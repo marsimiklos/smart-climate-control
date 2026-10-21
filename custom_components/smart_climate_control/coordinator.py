@@ -49,7 +49,7 @@ from .const import (
     DEFAULT_FREE_COOLING_MAX_DURATION, DEFAULT_FREE_COOLING_COOLDOWN,
     CONF_COMFORT_OFFSET, FALLBACK_OUTSIDE_TEMP, HUMIDITY_LOCK_MIN_OUTSIDE, AWAY_STATES,
     CONF_SCHEDULE, CONF_PREHEAT_MAX_MINUTES, DEFAULT_PREHEAT_MAX_MINUTES,
-    CONF_HEAT_PUMP_POWER_SENSOR, CONF_RATED_POWER, DEFAULT_RATED_POWER,
+    CONF_HEAT_PUMP_POWER_SENSOR, CONF_RATED_POWER, DEFAULT_RATED_POWER, CONF_ARRIVAL_ZONE,
 )
 from .stats import RunStats
 from .thermal import ThermalModel, WarmupTracker
@@ -232,12 +232,30 @@ class SmartClimateCoordinator:
         if not tracker:
             return False
         state = self.hass.states.get(tracker)
-        return state is not None and state.state in AWAY_STATES
+        if state is None or state.state in ("unknown", "unavailable"):
+            return False
+        if state.entity_id.split(".")[0] in ("person", "device_tracker"):
+            # Outside the home zone the state is the name of the zone the person is in
+            return state.state != "home"
+        return state.state in AWAY_STATES
+
+    @property
+    def arriving(self) -> bool:
+        """Nobody is home but someone is inside the arrival zone (e.g. the town zone)."""
+        zone_id = self._get_config_value(CONF_ARRIVAL_ZONE)
+        if not zone_id or not self.is_away:
+            return False
+        state = self.hass.states.get(zone_id)
+        try:
+            return state is not None and int(state.state) > 0
+        except ValueError:
+            return False
 
     @property
     def is_comfort_mode_active(self) -> bool:
         if self.boost_mode or self.force_comfort_mode or self.override_mode: return True
-        if self.force_eco_mode or self.sleep_mode_active or self.is_away or self.schedule_eco_active: return False
+        if self.force_eco_mode or self.sleep_mode_active: return False
+        if (self.is_away and not self.arriving) or self.schedule_eco_active: return False
         return True
 
     # Option keys that map onto runtime values (which are also adjustable via number entities)
@@ -404,7 +422,7 @@ class SmartClimateCoordinator:
         
         # Add temperature & power sensors for immediate reaction
         for key in [CONF_ROOM_SENSOR, CONF_OUTSIDE_SENSOR, CONF_AVERAGE_SENSOR, CONF_SOLAR_SENSOR,
-                    CONF_CONSUMPTION_SENSOR, CONF_PRESENCE_TRACKER, CONF_SCHEDULE]:
+                    CONF_CONSUMPTION_SENSOR, CONF_PRESENCE_TRACKER, CONF_SCHEDULE, CONF_ARRIVAL_ZONE]:
             sensor_id = self._get_config_value(key, None)
             if sensor_id and sensor_id not in listen_sensors:
                 listen_sensors.append(sensor_id)
@@ -660,7 +678,8 @@ class SmartClimateCoordinator:
         
         if not is_cooling and self.boost_mode: return self.boost_temp
         if self.override_mode or self.force_comfort_mode: return comf
-        if self.force_eco_mode or self.sleep_mode_active or self.is_away or self.schedule_eco_active: return eco
+        if self.force_eco_mode or self.sleep_mode_active: return eco
+        if (self.is_away and not self.arriving) or self.schedule_eco_active: return eco
         return comf
     
     async def _calculate_heating_control(self, room_temp: Optional[float], outside_temp: float, avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool, applied_solar_offset: float) -> tuple[str, Optional[float], str]:
@@ -905,6 +924,12 @@ class SmartClimateCoordinator:
         self.preheat_active = False
         self.preheat_minutes = None
 
+        if self.arriving:
+            # Someone is on the way home: comfort now, whatever the schedule says
+            self._preheat_event = None
+            self.preheat_start = None
+            return
+
         schedule_id = self._get_config_value(CONF_SCHEDULE)
         state = self.hass.states.get(schedule_id) if schedule_id and self.schedule_enabled else None
         if state is None or state.state != STATE_OFF:
@@ -1107,7 +1132,8 @@ class SmartClimateCoordinator:
         if action == "off": return f"OFF | R: {room_str}°C | H: {avg_str}°C | O: {outside_str} | {reason}{rt_info}"
         if self.boost_mode: mode_str = "Boost"
         elif self.override_mode or self.force_comfort_mode: mode_str = "Force Comfort"
-        elif self.force_eco_mode or self.sleep_mode_active or self.is_away or self.schedule_eco_active: mode_str = "Eco"
+        elif self.force_eco_mode or self.sleep_mode_active or (self.is_away and not self.arriving) or self.schedule_eco_active: mode_str = "Eco"
+        elif self.arriving: mode_str = "Arrival"
         elif self.preheat_active: mode_str = "Preheat"
         else: mode_str = "Comfort"
         temp_str = f"{temperature}°C (B:{original_temperature} +{weather_compensation})" if weather_compensation > 0 else f"{temperature}°C"

@@ -2,6 +2,14 @@
 
 This fork continues from the original project's v3.0.
 
+## 3.3.0
+
+### Added
+- *Arrival zone* option: while nobody is home and someone is inside the zone (for example the town), comfort is used so the house is warm when they arrive.
+
+### Fixed
+- A person or device tracker in a named zone (state is the zone name, not `not_home`) is now recognised as away.
+
 ## 3.2.0
 
 ### Added

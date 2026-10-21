@@ -46,6 +46,7 @@ This is a fork of [smartthings54/smart-climate-control](https://github.com/smart
 **Smart home integration**
 
 - Presence tracker: switches to Eco when nobody is home
+- Arrival zone: when nobody is home and someone enters a zone you choose (for example the town), the house goes back to comfort so it is warm on arrival
 - Bed sensors: switches to Eco while sleeping (heating only)
 - Window / door sensors: pauses the HVAC after a delay and restores it after a cool-down
 - Heat pump contact sensor: verifies a (for example IR controlled) unit is really running
@@ -84,6 +85,7 @@ Copy `custom_components/smart_climate_control` to `config/custom_components/` an
 | Window / door sensors | no | Pause the HVAC while open |
 | Heat pump contact sensor | no | Verify the unit is running |
 | Presence tracker | no | Eco when away (`person`, `device_tracker`, `binary_sensor`, `input_boolean`, `group`) |
+| Arrival zone (`zone`) | no | Comfort as soon as someone enters it while the house is empty. Needs the presence tracker |
 | Bed sensors | no | Eco while sleeping |
 | Solar production sensor (W) / consumption sensor (W) | no | Solar sync |
 | Schedule (`schedule` helper) | no | Comfort / eco times and pre-heating |
@@ -106,7 +108,7 @@ The names below assume the default name `Smart Climate`.
 
 ### Which target is used
 
-From highest to lowest priority: **Boost** (heating only) → **Force Comfort** → **Force Eco**, **sleeping**, **away** or **schedule off** → **Comfort** (also while **pre-heating**).
+From highest to lowest priority: **Boost** (heating only) → **Force Comfort** → **Force Eco** or **sleeping** → **away** or **schedule off** (unless someone is **arriving**) → **Comfort** (also while **pre-heating**).
 
 HEAT, COOL and AUTO all use the deadband. **Force Heating** is a separate switch: it keeps heating continuously at the current target and ignores the deadband (the house temperature limit, the window pause and the compressor minimum times still apply).
 
@@ -119,6 +121,12 @@ Create a schedule helper (**Settings → Devices & services → Helpers → Sche
 - The **heating rate** (°C/h) is learned from your own house: whenever the heat pump runs for at least 20 minutes with a real gap to the target, the observed temperature rise is stored in a moving average per outside temperature range. Until something has been learned, 1 °C/h is assumed, so the first mornings start a bit early or late. Use the **Learned Heating Rate** sensor to follow it.
 - Pre-heating is skipped when nobody is home, when heating is not the active mode, or when the **Preheat** switch is off. Switch **Schedule Control** off to ignore the schedule completely. If the schedule entity is unavailable, the normal behaviour continues.
 - Other rules still win: Boost, Force Comfort and Force Eco override the schedule.
+
+## Arrival
+
+Create a zone around your town (**Settings → Areas, labels & zones → Zones**) and select it as *Arrival zone*. When the presence tracker says nobody is home and the zone contains at least one person, the comfort target is used (overriding away eco and an off schedule) until someone is home again. Since the zone is a fixed distance away, the lead time is always about the same; pick a radius that matches how long your house needs to warm up.
+
+A person in the zone while somebody else is already home does nothing, and *Force Eco* still wins.
 
 ## Statistics and diagnosis
 

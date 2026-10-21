@@ -18,7 +18,8 @@
           "solar_sensor": "Napelem termelés szenzor (W)",
           "consumption_sensor": "Ház fogyasztás szenzor (W)",
           "schedule": "Ütemező (bekapcsolva komfort, kikapcsolva eco, bekapcsolás előtt előfűt)",
-          "heat_pump_power_sensor": "Hőszivattyú teljesítményszenzor (W, energiabecsléshez)"
+          "heat_pump_power_sensor": "Hőszivattyú teljesítményszenzor (W, energiabecsléshez)",
+          "arrival_zone": "Érkezési zóna (pl. a város: komfort, amint valaki belép, miközben senki nincs otthon)"
         }
       }
     },
@@ -75,7 +76,8 @@
           "schedule": "Ütemező (bekapcsolva komfort, kikapcsolva eco, bekapcsolás előtt előfűt)",
           "heat_pump_power_sensor": "Hőszivattyú teljesítményszenzor (W, energiabecsléshez)",
           "preheat_max_minutes": "Maximális előfűtési idő",
-          "rated_power": "Hőszivattyú átlagos teljesítménye működés közben (W, ha nincs teljesítményszenzor)"
+          "rated_power": "Hőszivattyú átlagos teljesítménye működés közben (W, ha nincs teljesítményszenzor)",
+          "arrival_zone": "Érkezési zóna (pl. a város: komfort, amint valaki belép, miközben senki nincs otthon)"
         }
       }
     }
