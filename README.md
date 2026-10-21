@@ -1,227 +1,174 @@
-# **Smart Climate Control for Home Assistant**
+# Smart Climate Control for Home Assistant
 
-This project started out as a Node-RED flow but has been rebuilt as a native Home Assistant integration.
+[![Validate](https://github.com/smartthings54/smart-climate-control/actions/workflows/validate.yml/badge.svg)](https://github.com/smartthings54/smart-climate-control/actions/workflows/validate.yml)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 
-The goal is to make climate management simpler and more flexible instead of editing flows,
+A native Home Assistant integration that runs your heat pump / air conditioner and heat recovery ventilation (HRV) with a bit of intelligence: deadband control, weather compensation, solar surplus storage, presence and sleep detection, free cooling and humidity-driven ventilation.
 
-configuration can now be adjusted directly from the Home Assistant control panel.
+It started as a Node-RED flow and was rebuilt as an integration, so everything is configured from the Home Assistant UI instead of by editing flows.
 
-The majority of the code was generated with the help of AI, with my role focused on integration, testing, and making it work within my setup.
+> Most of the code was written with the help of AI. My part is integration, testing, and making it work in my own setup. Please test it with your hardware before relying on it.
 
-## **🌟 Features**
+![Overview](docs/images/smart-climate-overview.png)
 
-* **🌡️ Intelligent Temperature Control**  
-  * **Heating & Cooling Modes**: Full-featured heating and smart cooling support  
-  * Deadband control to prevent rapid cycling  
-  * Weather compensation for cold days (heating mode only)  
-  * Multiple temperature presets for heating (Comfort, Eco, Boost) and cooling (Comfort, Eco)  
-  * Adjustable temperature settings via frontend number entities  
-* **☀️ Solar Synchronization (Battery Saver)**  
-  * Acts as a thermal battery: uses excess solar power (W) to safely overheat/overcool the house by a configurable offset.  
-  * Automatically shifts back to normal target temperatures when solar production drops.  
-* **💨 Advanced HRV Ventilation Control**  
-  * **Auto Free Cooling**: Automatically pulls in cool outside air when the house is too warm, bypassing the heat pump to save energy.  
-  * **Airout Mode**: Manual or automatic single-direction ventilation for rapid air exchange.  
-  * **Smart Humidity Lock**: Fixes fan direction to quickly extract moisture if only one room is highly humid.  
-  * **Frost Protection**: Disables humidity direction-lock if the outside temperature drops below 15°C to preserve heat recovery efficiency.  
-* **🏠 Smart Home Integration**  
-  * Occupancy-based heating/cooling via presence tracker (Auto-Eco when away)  
-  * Sleep detection for automatic eco mode (heating only, requires bed sensor)  
-  * Door/window monitoring to prevent energy waste (pauses HVAC after delay)  
-* **Heat Pump Contact Sensor**: Binary sensor to verify heat pump is actually running (recommended for IR/SmartIR controlled devices)
+## Features
 
-## **🔥❄️ Heating vs Cooling Modes**
+**Temperature control**
 
-### **Heating Mode (HEAT/AUTO)**
+- Heating and cooling with **AUTO** mode (picks heat or cool from the outside temperature, falls back to the room temperature)
+- Deadband control to prevent rapid cycling, plus minimum run time and minimum off time for the compressor
+- Presets: Comfort, Eco and Boost for heating, Comfort and Eco for cooling
+- Weather compensation for freezing days (heating only)
+- Whole-house maximum temperature safety limit (heating)
 
-Full-featured intelligent heating with:
+**Solar sync ("thermal battery")**
 
-* Multiple temperature presets (Comfort, Eco, Boost)  
-* Sleep detection (automatic eco mode)  
-* Weather compensation for cold days  
-* House average temperature safety limits  
-* Solar Sync thermal storage
+- Uses surplus solar power to shift the target by a configurable offset
+- Two levels: *base* (run at the normal target) and *offset* (run with the shifted target), with a delay before dropping back
 
-### **Cooling Mode (COOL)**
+**Ventilation (HRV)**
 
-Intelligent cooling with:
+- Two fan groups that alternate direction, scheduled runs, and humidity-triggered runs
+- Humidity lock: if only one side is humid, the direction is fixed to extract it fast (disabled below 15 °C outside to keep heat recovery efficient)
+- Auto free cooling: pulls in cooler outside air instead of running the compressor
+- Manual airout in a chosen direction
+- Periodic fan circulation while cooling is idle
 
-* Two presets: Comfort (when home) and Eco (when away)  
-* Inverted deadband control (cool when hot, stop when cool)  
-* Auto Free Cooling integration (uses outside air instead of the compressor when possible)  
-* Solar Sync thermal storage
+**Smart home integration**
 
-## **📋 Prerequisites**
+- Presence tracker: switches to Eco when nobody is home
+- Bed sensors: switches to Eco while sleeping (heating only)
+- Window / door sensors: pauses the HVAC after a delay and restores it after a cool-down
+- Heat pump contact sensor: verifies a (for example IR controlled) unit is really running
 
-* Home Assistant 2024.1.0 or newer  
-* HACS (Home Assistant Community Store) installed  
-* The following entities in your Home Assistant:  
-  * A climate entity (heat pump/thermostat) that supports both heating and cooling  
-  * Room temperature sensor  
-  * Outside temperature sensor (optional but recommended for weather compensation, free cooling, and frost protection)
+## Requirements
 
-## **🚀 Installation**
+- Home Assistant 2024.12 or newer
+- HACS (recommended)
+- A `climate` entity for the heat pump / air conditioner
+- A room temperature sensor
 
-### **Via HACS (Recommended)**
+Everything else (outside sensor, solar, fans, presence, ...) is optional.
 
-1. Open HACS in your Home Assistant instance  
-2. Click on "Integrations"  
-3. Click the three dots menu in the top right  
-4. Select "Custom repositories"  
-5. Add this repository URL: https://github.com/smartthings54/smart-climate-control  
-6. Select "Integration" as the category  
-7. Click "Add"  
-8. Search for "Smart Climate Control"  
-9. Click "Download"  
-10. Restart Home Assistant
+## Installation
 
-### **Manual Installation**
+### HACS (recommended)
 
-1. Download the latest release from GitHub  
-2. Extract the smart\_climate\_control folder  
-3. Copy it to your custom\_components directory:  
-   config/custom\_components/smart\_climate\_control/
+1. HACS → three-dot menu → **Custom repositories**
+2. Add `https://github.com/smartthings54/smart-climate-control` as category **Integration**
+3. Search for **Smart Climate Control**, download it and restart Home Assistant
 
-4. Restart Home Assistant
+### Manual
 
-## **⚙️ Configuration**
+Copy `custom_components/smart_climate_control` to `config/custom_components/` and restart Home Assistant.
 
-### **Initial Setup**
+## Setup
 
-1. Go to **Settings** → **Devices & Services**  
-2. Click **\+ Add Integration**  
-3. Search for **Smart Climate Control**  
-4. Follow the setup wizard to select your entities.
+**Settings → Devices & services → Add integration → Smart Climate Control**, then pick your entities. Most settings can be changed later under **Configure** on the integration.
 
-### **Configuration Options**
+| Entity | Required | Used for |
+| --- | --- | --- |
+| Heat pump (`climate`) | yes | The device that is controlled |
+| Room temperature sensor | yes | Deadband control |
+| Outside temperature sensor | no | AUTO mode, weather compensation, free cooling, humidity lock |
+| Average house temperature sensor | no | House temperature safety limit |
+| Window / door sensors | no | Pause the HVAC while open |
+| Heat pump contact sensor | no | Verify the unit is running |
+| Presence tracker | no | Eco when away (`person`, `device_tracker`, `binary_sensor`, `input_boolean`, `group`) |
+| Bed sensors | no | Eco while sleeping |
+| Solar production sensor (W) / consumption sensor (W) | no | Solar sync |
+| Fan groups and humidity sensors | no | Ventilation |
 
-#### **Required Entities**
+The heat pump entity is shown under the integration's device. The original assignment is restored if you remove the integration.
 
-* **Heat Pump Entity**: Your climate device to control  
-* **Room Temperature Sensor**: The main room temperature
+## Entities
 
-#### **Optional Entities**
+The names below assume the default name `Smart Climate`.
 
-* **Outside Temperature Sensor**: For weather comp, free cooling, and winter HRV frost protection.  
-* **Average House Temperature**: For whole-house safety limits (heating).  
-* **Window/Door Sensors**: Disable HVAC when open for \> configured delay.  
-* **Presence Tracker**: For occupancy-based control (Auto-Eco).  
-* **Bed Sensor**: For sleep detection (heating mode).  
-* **Solar Sensor (Power)**: Power sensor (W) tracking your solar excess/production.  
-* **Ventilation Fans & Humidity Sensors**: For HRV and Free Cooling controls.
+| Platform | Entities |
+| --- | --- |
+| `climate` | Thermostat with OFF / HEAT / COOL / AUTO |
+| `switch` | Climate Management, Force Comfort Mode, Force Eco Mode, Force Boost Mode, Auto Free Cooling, Solar Sync, Periodic Fan Circulation, Ventilation Enabled, Ventilation Manual Run, Airout |
+| `select` | Operating Mode (auto / heat / cool), Airout Direction |
+| `sensor` | Status, Mode, Target, Active Logic, Ventilation Status |
+| `number` | Boost / Comfort / Eco / Cooling / Cooling Eco temperatures, humidity threshold, ventilation timings and speed, airout and free cooling limits, solar thresholds, offset and delay |
 
-#### **Adjustable Settings (via HA UI Number Entities)**
+### Which target is used
 
-* **Heating Comfort**: Default 20.0°C  
-* **Heating Eco**: Default 18.0°C  
-* **Heating Boost**: Default 23.0°C  
-* **Cooling Comfort**: Default 24.0°C  
-* **Cooling Eco**: Default 27.0°C  
-* **Solar Threshold (W)** & **Solar Offset (°C)**  
-* **Ventilation Cycle, Duration, Fan Speed, Airout Duration**  
-* **Free Cooling Max Duration & Cooldown**  
-* **Humidity Threshold**
+From highest to lowest priority: **Boost** (heating only) → **Force Comfort** → **Force Eco**, **sleeping** or **away** → **Comfort**.
 
-## **🎛️ Created Entities**
+> Choosing **HEAT** on the thermostat is a manual override: it uses the comfort target and keeps heating, **bypassing the deadband**. Use **AUTO** (or the Operating Mode select) if you want the full deadband logic and presence / sleep detection.
 
-### **Climate Entity**
+## Services
 
-* **climate.YOUR\_CLIMATE\_ENTITY** \- Main climate control with OFF/HEAT/COOL/AUTO modes
+| Service | Description |
+| --- | --- |
+| `smart_climate_control.force_eco` | Force eco mode (`enable`: true / false) |
+| `smart_climate_control.force_comfort` | Force comfort mode (`enable`: true / false) |
+| `smart_climate_control.reset_temperatures` | Reset all temperature presets to their defaults |
+| `smart_climate_control.trigger_ventilation` | Start a ventilation cycle now (optional `duration` in minutes) |
 
-### **Switches**
+## How it works
 
-* **switch.smart\_climate\_climate\_management** \- Master enable/disable for smart control  
-* **switch.smart\_climate\_force\_comfort\_mode** \- Force comfort temperature  
-* **switch.smart\_climate\_force\_eco\_mode** \- Force eco temperature  
-* **switch.smart\_climate\_force\_cooling\_mode** \- Force cooling mode  
-* **switch.smart\_climate\_ventilation\_enabled** \- Enable auto ventilation (HRV)  
-* **switch.smart\_climate\_airout** \- Trigger single-direction manual Airout  
-* **switch.smart\_climate\_auto\_free\_cooling** \- Enable/Disable Auto Free Cooling  
-* **switch.smart\_climate\_solar\_sync** \- Enable/Disable Solar Battery Saver
+The HVAC logic runs every 60 seconds and immediately (debounced to once per 5 s) when a configured sensor changes. Ventilation is checked every 2 seconds.
 
-### **Select**
+1. **Mode**: AUTO resolves to cooling above 22 °C outside, heating below 16 °C, and in between to cooling only if the room is at or above the cooling target.
+2. **Target**: presets, presence, sleep, solar offset and weather compensation are applied.
+3. **Deadband**:
+   - Heating turns on at `target − deadband below` and off at `target + deadband above`.
+   - Cooling turns on at `target + deadband above` and off at `target − deadband below`.
+4. **Protections**: boot delay after Home Assistant starts, minimum run time, minimum off time, window / door pause.
+5. **Ventilation**: free cooling, humidity, scheduled runs and airout, in that order of priority.
 
-* **select.smart\_climate\_airout\_direction** \- Choose Airout direction (forward/reverse)
+Commands to the heat pump are retried in the background (up to three times with a state check), so a slow device never blocks the control loop.
 
-### **Sensors**
+![Deadbands](docs/images/deadbands.jpg)
 
-* **sensor.smart\_climate\_status** \- Current system status and debug info  
-* **sensor.smart\_climate\_mode** \- Current active mode  
-* **sensor.smart\_climate\_target** \- Target temperature being used  
-* **sensor.smart\_climate\_ventilation\_status** \- Details on fan phases and timers
+## Dashboard example
 
-### **Number Entities**
+```yaml
+type: vertical-stack
+cards:
+  - type: thermostat
+    entity: climate.smart_climate
+  - type: entities
+    entities:
+      - sensor.smart_climate_status
+      - sensor.smart_climate_mode
+      - switch.smart_climate_climate_management
+      - switch.smart_climate_solar_sync
+      - switch.smart_climate_auto_free_cooling
+```
 
-Various sliders to adjust temperatures (Boost, Comfort, Eco, Cooling, Cooling Eco), Deadbands, Solar thresholds, and Ventilation settings on the fly.
+## Troubleshooting
 
-## **📱 Dashboard Cards**
+**The system is not heating / cooling**
 
-### **Basic Status & Control Card**
+1. Is the **Climate Management** switch on?
+2. Is a window / door sensor open (or in its restore cool-down)?
+3. Read the **Status** sensor. It states the reason (deadband, minimum run / off time, boot delay, ...).
+4. Check that Solar Sync is not shifting the target.
 
-type: vertical-stack  
-cards:  
-  \- type: thermostat  
-    entity: climate.YOUR\_CLIMATE\_ENTITY  
-  \- type: entities  
-    entities:  
-      \- entity: sensor.smart\_climate\_status  
-      \- entity: sensor.smart\_climate\_mode  
-      \- entity: switch.smart\_climate\_climate\_management  
-      \- entity: switch.smart\_climate\_solar\_sync  
-      \- entity: switch.smart\_climate\_auto\_free\_cooling
+**Ventilation is stuck in one direction**
 
-### **Advanced Settings Card**
+1. Is an airout or free cooling run active?
+2. Is the humidity threshold exceeded on only one side while it is warmer than 15 °C outside? Then the direction is locked on purpose.
 
-type: entities  
-title: Smart Climate Settings  
-entities:  
-  \- entity: number.smart\_climate\_comfort\_temperature  
-  \- entity: number.smart\_climate\_eco\_temperature  
-  \- entity: number.smart\_climate\_cooling\_temperature  
-  \- entity: number.smart\_climate\_cooling\_eco\_temperature  
-  \- entity: number.smart\_climate\_solar\_threshold  
-  \- entity: number.smart\_climate\_solar\_offset
+## Development
 
-### **Ventilation & Airout Card**
+```bash
+pip install -r requirements_test.txt
+pytest
+ruff check .
+```
 
-type: entities  
-title: Ventilation Control  
-entities:  
-  \- entity: sensor.smart\_climate\_ventilation\_status  
-  \- entity: switch.smart\_climate\_airout  
-  \- entity: select.smart\_climate\_airout\_direction  
-  \- entity: number.smart\_climate\_airout\_max\_duration
+The decision logic that does not need Home Assistant lives in `custom_components/smart_climate_control/logic.py` and is covered by unit tests.
 
-## **🎯 How It Works**
+## Support
 
-The system operates on a 60-second cycle for HVAC and a 2-second cycle for precise HRV fan syncing:
+- [Issues](https://github.com/smartthings54/smart-climate-control/issues)
+- [Discussions](https://github.com/smartthings54/smart-climate-control/discussions)
 
-1. **Presence & Solar Check**: Evaluates if someone is home (Comfort vs Eco) and if solar excess meets the threshold (applies offset).  
-2. **Free Cooling Check**: If it's hot inside but cool outside, bypasses the AC and triggers the Airout fans instead.  
-3. **Humidity Check**: Normal HRV alternates fan directions. If one room is highly humid and outside is \> 15°C, it locks the direction to extract moisture fast.  
-4. **Deadband Logic**:  
-   * **Heating**: Turn ON when Room ≤ (Target \- Deadband Below). Turn OFF when Room ≥ (Target \+ Deadband Above).  
-   * **Cooling**: Turn ON when Room ≥ (Target \+ Deadband Above). Turn OFF when Room ≤ (Target \- Deadband Below).
+## License
 
-## **🐛 Troubleshooting**
-
-### **System Not Heating/Cooling**
-
-1. Check if **Climate Management** switch is ON.  
-2. Check if a window/door sensor is triggered (pauses HVAC).  
-3. Review the **Status** sensor for details (it might be in a deadband holding pattern).  
-4. Verify Solar Sync isn't throwing the target temperature too high/low.
-
-### **Ventilation Stuck in One Direction**
-
-1. Check if an **Airout** or **Free Cooling** cycle is currently active.  
-2. Check if the **Humidity Threshold** is exceeded in only one room (and outside is \> 15°C).
-
-## **📝 Support**
-
-* **Issues**: [GitHub Issues](https://github.com/smartthings54/smart-climate-control/issues)  
-* **Discussions**: [GitHub Discussions](https://github.com/smartthings54/smart-climate-control/discussions)
-
-## **📄 License**
-
-This project is licensed under the MIT License \- see the [LICENSE](http://docs.google.com/LICENSE) file for details.
+MIT, see [LICENSE](LICENSE).
