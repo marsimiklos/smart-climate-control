@@ -23,6 +23,11 @@ CONF_WEATHER_COMP_FACTOR = "weather_comp_factor"
 CONF_MAX_COMP_TEMP = "max_comp_temp"
 CONF_MIN_COMP_TEMP = "min_comp_temp"
 CONF_COMFORT_OFFSET = "comfort_temp_offset"
+CONF_SCHEDULE = "schedule"
+CONF_ARRIVAL_ZONE = "arrival_zone"
+CONF_PREHEAT_MAX_MINUTES = "preheat_max_minutes"
+CONF_HEAT_PUMP_POWER_SENSOR = "heat_pump_power_sensor"
+CONF_RATED_POWER = "rated_power"
 CONF_MIN_RUN_TIME = "min_run_time"
 CONF_MIN_OFF_TIME = "min_off_time"
 CONF_BOOT_DELAY = "boot_delay"
@@ -85,9 +90,30 @@ DEFAULT_AIROUT_DURATION = 30
 DEFAULT_SOLAR_DELAY = 10.0
 DEFAULT_SOLAR_BASE_THRESHOLD = 1200.0
 DEFAULT_SOLAR_THRESHOLD = 2000.0
-DEFAULT_SOLAR_OFFSET = 1.0
+DEFAULT_SOLAR_OFFSET = 1.5
 DEFAULT_CONSUMPTION_THRESHOLD = 500.0
 
 DEFAULT_CIRCULATE_INTERVAL = 2
 DEFAULT_CIRCULATE_DURATION = 15
 DEFAULT_CIRCULATE_FAN_SPEED = 50
+
+DEFAULT_FREE_COOLING_MAX_DURATION = 60
+DEFAULT_FREE_COOLING_COOLDOWN = 3
+
+CONF_FREE_COOLING_MAX_DURATION = "free_cooling_max_duration"
+CONF_FREE_COOLING_COOLDOWN = "free_cooling_cooldown"
+
+# AUTO mode: pick the logic from the outside temperature, fall back to the room temperature in between
+AUTO_COOL_ABOVE_OUTSIDE = 22.0
+AUTO_HEAT_BELOW_OUTSIDE = 16.0
+# Outside temperature used when no outside sensor is available
+FALLBACK_OUTSIDE_TEMP = 5.0
+# Below this outside temperature the humidity lock is disabled to keep heat recovery efficient
+HUMIDITY_LOCK_MIN_OUTSIDE = 15.0
+
+# Presence tracker states that mean "nobody is home"
+AWAY_STATES = ("not_home", "away", "off")
+
+DEFAULT_PREHEAT_MAX_MINUTES = 180
+DEFAULT_RATED_POWER = 0
+

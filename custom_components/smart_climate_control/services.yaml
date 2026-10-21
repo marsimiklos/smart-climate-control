@@ -25,3 +25,18 @@ force_comfort:
 reset_temperatures:
   name: Reset Temperatures
   description: Reset all temperature settings to defaults
+
+
+trigger_ventilation:
+  name: Trigger Ventilation
+  description: Start a ventilation cycle now
+  fields:
+    duration:
+      name: Duration
+      description: How long to run, in minutes. Defaults to the configured run duration.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 240
+          unit_of_measurement: min

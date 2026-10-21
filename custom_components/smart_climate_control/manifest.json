@@ -1,13 +1,13 @@
 {
   "domain": "smart_climate_control",
   "name": "Smart Climate Control",
-  "codeowners": ["@smartthings54"],
+  "codeowners": ["@marsimiklos"],
   "config_flow": true,
-  "dependencies": ["climate", "sensor"],
-  "documentation": "https://github.com/smartthings54/smart-climate-control",
-  "homeassistant": "2024.1.0",
-  "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/smartthings54/smart-climate-control/issues",
+  "documentation": "https://github.com/marsimiklos/smart-climate-control",
+  "homeassistant": "2024.12.0",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/marsimiklos/smart-climate-control/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "3.3.0"
 }

@@ -1,147 +1,174 @@
-import logging
-from typing import Any, Dict, Optional, List, Union
+"""Config and options flow for Smart Climate Control."""
+from typing import Any, Dict, Optional
+
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.helpers import selector
-import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN, CONF_HEAT_PUMP, CONF_ROOM_SENSOR, CONF_OUTSIDE_SENSOR,
     CONF_AVERAGE_SENSOR, CONF_DOOR_SENSOR, CONF_WINDOW_SENSORS,
     CONF_WINDOW_DELAY, CONF_BED_SENSORS, CONF_PRESENCE_TRACKER,
-    CONF_HEAT_PUMP_CONTACT, CONF_COMFORT_TEMP, CONF_ECO_TEMP,
-    CONF_BOOST_TEMP, CONF_DEADBAND_BELOW, CONF_DEADBAND_ABOVE,
-    CONF_MAX_HOUSE_TEMP, CONF_WEATHER_COMP_FACTOR, CONF_MAX_COMP_TEMP,
-    CONF_MIN_COMP_TEMP, CONF_COMFORT_OFFSET, CONF_MIN_RUN_TIME, CONF_MIN_OFF_TIME, CONF_BOOT_DELAY,
-    CONF_LOW_TEMP_THRESHOLD, CONF_SAFETY_CUTOFF, CONF_FAN_GROUP_A,
-    CONF_FAN_GROUP_B, CONF_HUMIDITY_SENSOR_A, CONF_HUMIDITY_SENSOR_B,
-    CONF_VENT_CYCLE_TIME, CONF_VENT_DURATION, CONF_VENT_MAX_DURATION,
-    CONF_HUMIDITY_THRESHOLD, CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED,
-    CONF_SOLAR_SENSOR, CONF_COOLING_ECO_TEMP, CONF_ENABLE_VENTILATION,
-    CONF_CIRCULATE_INTERVAL, CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED,
-    CONF_SOLAR_DELAY, CONF_SOLAR_BASE_THRESHOLD, CONF_CONSUMPTION_SENSOR, CONF_CONSUMPTION_THRESHOLD,
-    DEFAULT_COMFORT_TEMP, DEFAULT_ECO_TEMP, DEFAULT_BOOST_TEMP, DEFAULT_DEADBAND, 
-    DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR, DEFAULT_MAX_COMP_TEMP, 
-    DEFAULT_MIN_COMP_TEMP, DEFAULT_COMFORT_OFFSET, DEFAULT_MIN_RUN_TIME, DEFAULT_MIN_OFF_TIME, DEFAULT_BOOT_DELAY,
-    DEFAULT_LOW_TEMP_THRESHOLD, DEFAULT_SAFETY_CUTOFF, DEFAULT_VENT_CYCLE_TIME, 
-    DEFAULT_VENT_DURATION, DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD, 
-    DEFAULT_VENT_AUTO_INTERVAL, DEFAULT_VENT_FAN_SPEED, DEFAULT_WINDOW_DELAY, 
-    DEFAULT_COOLING_ECO_TEMP, DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, 
-    DEFAULT_CIRCULATE_FAN_SPEED, DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY, DEFAULT_SOLAR_BASE_THRESHOLD,
-    DEFAULT_CONSUMPTION_THRESHOLD
+    CONF_HEAT_PUMP_CONTACT, CONF_COMFORT_OFFSET, CONF_MIN_RUN_TIME, CONF_MIN_OFF_TIME,
+    CONF_BOOT_DELAY, CONF_DEADBAND_BELOW, CONF_DEADBAND_ABOVE, CONF_MAX_HOUSE_TEMP,
+    CONF_WEATHER_COMP_FACTOR, CONF_MAX_COMP_TEMP, CONF_MIN_COMP_TEMP,
+    CONF_LOW_TEMP_THRESHOLD, CONF_SAFETY_CUTOFF, CONF_FAN_GROUP_A, CONF_FAN_GROUP_B,
+    CONF_HUMIDITY_SENSOR_A, CONF_HUMIDITY_SENSOR_B, CONF_VENT_CYCLE_TIME,
+    CONF_VENT_DURATION, CONF_VENT_MAX_DURATION, CONF_HUMIDITY_THRESHOLD,
+    CONF_VENT_AUTO_INTERVAL, CONF_VENT_FAN_SPEED, CONF_SOLAR_SENSOR,
+    CONF_COOLING_ECO_TEMP, CONF_ENABLE_VENTILATION, CONF_CIRCULATE_INTERVAL,
+    CONF_CIRCULATE_DURATION, CONF_CIRCULATE_FAN_SPEED, CONF_SOLAR_DELAY,
+    CONF_SOLAR_BASE_THRESHOLD, CONF_CONSUMPTION_SENSOR, CONF_CONSUMPTION_THRESHOLD,
+    DEFAULT_DEADBAND, DEFAULT_MAX_HOUSE_TEMP, DEFAULT_WEATHER_COMP_FACTOR,
+    DEFAULT_MAX_COMP_TEMP, DEFAULT_MIN_COMP_TEMP, DEFAULT_MIN_RUN_TIME,
+    DEFAULT_MIN_OFF_TIME, DEFAULT_BOOT_DELAY, DEFAULT_LOW_TEMP_THRESHOLD,
+    DEFAULT_SAFETY_CUTOFF, DEFAULT_VENT_CYCLE_TIME, DEFAULT_VENT_DURATION,
+    DEFAULT_VENT_MAX_DURATION, DEFAULT_HUMIDITY_THRESHOLD, DEFAULT_VENT_AUTO_INTERVAL,
+    DEFAULT_VENT_FAN_SPEED, DEFAULT_WINDOW_DELAY, DEFAULT_COOLING_ECO_TEMP,
+    DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED,
+    DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY, DEFAULT_SOLAR_BASE_THRESHOLD,
+    DEFAULT_CONSUMPTION_THRESHOLD,
+    CONF_SCHEDULE, CONF_PREHEAT_MAX_MINUTES, CONF_HEAT_PUMP_POWER_SENSOR, CONF_RATED_POWER,
+    CONF_ARRIVAL_ZONE,
+    DEFAULT_PREHEAT_MAX_MINUTES, DEFAULT_RATED_POWER,
 )
 
-_LOGGER = logging.getLogger(__name__)
+def _number(min_value: float, max_value: float, step: float, unit: str) -> selector.NumberSelector:
+    return selector.NumberSelector(selector.NumberSelectorConfig(
+        min=min_value, max=max_value, step=step,
+        mode=selector.NumberSelectorMode.SLIDER, unit_of_measurement=unit,
+    ))
+
+
+def _entity(multiple: bool = False, **kwargs: Any) -> selector.EntitySelector:
+    return selector.EntitySelector(selector.EntitySelectorConfig(multiple=multiple, **kwargs))
+
 
 class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None):
-        errors: Dict[str, str] = {}
         if user_input is not None:
+            await self.async_set_unique_id(user_input[CONF_HEAT_PUMP])
+            self._abort_if_unique_id_configured()
             return self.async_create_entry(title=user_input.get(CONF_NAME, "Smart Climate Control"), data=user_input)
 
         schema = vol.Schema({
             vol.Required(CONF_NAME, default="Smart Climate"): str,
-            vol.Required(CONF_HEAT_PUMP): selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
-            vol.Required(CONF_ROOM_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
-            vol.Optional(CONF_OUTSIDE_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
-            vol.Optional(CONF_AVERAGE_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
-            vol.Optional(CONF_WINDOW_SENSORS): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", multiple=True)),
-            vol.Optional(CONF_DOOR_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
-            vol.Optional(CONF_HEAT_PUMP_CONTACT): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
-            vol.Optional(CONF_PRESENCE_TRACKER): selector.EntitySelector(selector.EntitySelectorConfig()),
-            vol.Optional(CONF_SOLAR_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power")),
-            vol.Optional(CONF_CONSUMPTION_SENSOR): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power")),
+            vol.Required(CONF_HEAT_PUMP): _entity(domain="climate"),
+            vol.Required(CONF_ROOM_SENSOR): _entity(domain="sensor", device_class="temperature"),
+            vol.Optional(CONF_OUTSIDE_SENSOR): _entity(domain="sensor", device_class="temperature"),
+            vol.Optional(CONF_AVERAGE_SENSOR): _entity(domain="sensor", device_class="temperature"),
+            vol.Optional(CONF_WINDOW_SENSORS): _entity(multiple=True, domain="binary_sensor"),
+            vol.Optional(CONF_DOOR_SENSOR): _entity(domain="binary_sensor"),
+            vol.Optional(CONF_HEAT_PUMP_CONTACT): _entity(domain="binary_sensor"),
+            vol.Optional(CONF_PRESENCE_TRACKER): _entity(domain=["person", "device_tracker", "binary_sensor", "input_boolean", "group"]),
+            vol.Optional(CONF_BED_SENSORS): _entity(multiple=True, domain=["binary_sensor", "input_boolean"]),
+            vol.Optional(CONF_SOLAR_SENSOR): _entity(domain="sensor", device_class="power"),
+            vol.Optional(CONF_CONSUMPTION_SENSOR): _entity(domain="sensor", device_class="power"),
+            vol.Optional(CONF_SCHEDULE): _entity(domain="schedule"),
+            vol.Optional(CONF_ARRIVAL_ZONE): _entity(domain="zone"),
+            vol.Optional(CONF_HEAT_PUMP_POWER_SENSOR): _entity(domain="sensor", device_class="power"),
         })
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="user", data_schema=schema)
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
         return SmartClimateOptionsFlowHandler()
 
+
+# (key, default, selector) for the numeric options
+_BASE_NUMBERS = [
+    (CONF_COOLING_ECO_TEMP, DEFAULT_COOLING_ECO_TEMP, _number(20, 30, 0.5, "°C")),
+    (CONF_DEADBAND_BELOW, DEFAULT_DEADBAND, _number(0, 3, 0.1, "°C")),
+    (CONF_DEADBAND_ABOVE, DEFAULT_DEADBAND, _number(0, 3, 0.1, "°C")),
+    (CONF_MAX_HOUSE_TEMP, DEFAULT_MAX_HOUSE_TEMP, _number(18, 32, 0.5, "°C")),
+    (CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD, _number(-20, 15, 1, "°C")),
+    (CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF, _number(0, 5, 0.1, "°C")),
+    (CONF_COMFORT_OFFSET, 0.0, _number(0, 3, 0.1, "°C")),
+    (CONF_PREHEAT_MAX_MINUTES, DEFAULT_PREHEAT_MAX_MINUTES, _number(0, 360, 15, "min")),
+    (CONF_RATED_POWER, DEFAULT_RATED_POWER, _number(0, 10000, 50, "W")),
+    (CONF_WEATHER_COMP_FACTOR, DEFAULT_WEATHER_COMP_FACTOR, _number(0, 2, 0.1, "")),
+    (CONF_MAX_COMP_TEMP, DEFAULT_MAX_COMP_TEMP, _number(16, 35, 1, "°C")),
+    (CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP, _number(10, 25, 1, "°C")),
+    (CONF_WINDOW_DELAY, DEFAULT_WINDOW_DELAY, _number(0, 60, 1, "min")),
+    (CONF_BOOT_DELAY, DEFAULT_BOOT_DELAY, _number(0, 10, 1, "min")),
+    (CONF_MIN_RUN_TIME, DEFAULT_MIN_RUN_TIME, _number(0, 120, 5, "min")),
+    (CONF_MIN_OFF_TIME, DEFAULT_MIN_OFF_TIME, _number(0, 60, 1, "min")),
+    (CONF_SOLAR_DELAY, DEFAULT_SOLAR_DELAY, _number(0, 60, 1, "min")),
+    (CONF_SOLAR_BASE_THRESHOLD, DEFAULT_SOLAR_BASE_THRESHOLD, _number(0, 10000, 100, "W")),
+    (CONF_CONSUMPTION_THRESHOLD, DEFAULT_CONSUMPTION_THRESHOLD, _number(0, 10000, 100, "W")),
+]
+
+_VENT_NUMBERS = [
+    (CONF_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_INTERVAL, _number(1, 12, 1, "h")),
+    (CONF_CIRCULATE_DURATION, DEFAULT_CIRCULATE_DURATION, _number(5, 60, 5, "min")),
+    (CONF_CIRCULATE_FAN_SPEED, DEFAULT_CIRCULATE_FAN_SPEED, _number(10, 100, 1, "%")),
+    (CONF_HUMIDITY_THRESHOLD, DEFAULT_HUMIDITY_THRESHOLD, _number(40, 100, 1, "%")),
+    (CONF_VENT_CYCLE_TIME, DEFAULT_VENT_CYCLE_TIME, _number(30, 300, 5, "sec")),
+    (CONF_VENT_DURATION, DEFAULT_VENT_DURATION, _number(10, 240, 5, "min")),
+    (CONF_VENT_MAX_DURATION, DEFAULT_VENT_MAX_DURATION, _number(10, 480, 5, "min")),
+    (CONF_VENT_AUTO_INTERVAL, DEFAULT_VENT_AUTO_INTERVAL, _number(0, 48, 1, "h")),
+    (CONF_VENT_FAN_SPEED, DEFAULT_VENT_FAN_SPEED, _number(10, 100, 1, "%")),
+]
+
+# (key, multiple, entity selector config) for the optional entity pickers
+_BASE_ENTITIES = [
+    (CONF_OUTSIDE_SENSOR, False, {"domain": "sensor", "device_class": "temperature"}),
+    (CONF_AVERAGE_SENSOR, False, {"domain": "sensor", "device_class": "temperature"}),
+    (CONF_WINDOW_SENSORS, True, {"domain": "binary_sensor"}),
+    (CONF_DOOR_SENSOR, False, {"domain": "binary_sensor"}),
+    (CONF_HEAT_PUMP_CONTACT, False, {"domain": "binary_sensor"}),
+    (CONF_PRESENCE_TRACKER, False, {"domain": ["person", "device_tracker", "binary_sensor", "input_boolean", "group"]}),
+    (CONF_BED_SENSORS, True, {"domain": ["binary_sensor", "input_boolean"]}),
+    (CONF_SOLAR_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
+    (CONF_CONSUMPTION_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
+    (CONF_SCHEDULE, False, {"domain": "schedule"}),
+    (CONF_ARRIVAL_ZONE, False, {"domain": "zone"}),
+    (CONF_HEAT_PUMP_POWER_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
+]
+
+_VENT_ENTITIES = [
+    (CONF_FAN_GROUP_A, True, {"domain": "fan"}),
+    (CONF_FAN_GROUP_B, True, {"domain": "fan"}),
+    (CONF_HUMIDITY_SENSOR_A, True, {"domain": "sensor", "device_class": "humidity"}),
+    (CONF_HUMIDITY_SENSOR_B, True, {"domain": "sensor", "device_class": "humidity"}),
+]
+
+
 class SmartClimateOptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self) -> None:
-        pass
+    def _current(self, key: str, default: Any = None) -> Any:
+        """Options win over the initial setup data. A stored 0 is a real value."""
+        if key in self.config_entry.options:
+            value = self.config_entry.options[key]
+        else:
+            value = self.config_entry.data.get(key)
+        return default if value is None else value
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None):
+        vent_enabled = self._current(CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION)
+        numbers = _BASE_NUMBERS + (_VENT_NUMBERS if vent_enabled else [])
+        entities = _BASE_ENTITIES + (_VENT_ENTITIES if vent_enabled else [])
+
         if user_input is not None:
+            # A cleared entity picker is simply missing from the input. Store the empty
+            # value explicitly, otherwise the value from the initial setup would come back.
+            for key, multiple, _ in entities:
+                user_input.setdefault(key, [] if multiple else None)
             return self.async_create_entry(title="", data=user_input)
 
-        def get_opt(key): 
-            return self.config_entry.options.get(key, self.config_entry.data.get(key))
+        schema: Dict[Any, Any] = {
+            vol.Required(CONF_ENABLE_VENTILATION, default=vent_enabled): selector.BooleanSelector(),
+        }
+        for key, default, number_selector in numbers:
+            schema[vol.Optional(key, default=self._current(key, default))] = number_selector
+        for key, multiple, config in entities:
+            current = self._current(key)
+            marker = vol.Optional(key, description={"suggested_value": current}) if current else vol.Optional(key)
+            schema[marker] = _entity(multiple=multiple, **config)
 
-        def get_list_opt(key): 
-            val = self.config_entry.options.get(key, self.config_entry.data.get(key))
-            if not val:
-                return None
-            if isinstance(val, str):
-                return [val]
-            return val
-
-        schema_dict = {}
-
-        vent_enabled = self.config_entry.options.get(CONF_ENABLE_VENTILATION, self.config_entry.data.get(CONF_ENABLE_VENTILATION, DEFAULT_ENABLE_VENTILATION))
-        schema_dict[vol.Required(CONF_ENABLE_VENTILATION, default=vent_enabled)] = selector.BooleanSelector()
-
-        schema_dict[vol.Optional(CONF_COOLING_ECO_TEMP, default=get_opt(CONF_COOLING_ECO_TEMP) or DEFAULT_COOLING_ECO_TEMP)] = selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=30, step=0.5, mode="slider", unit_of_measurement="°C"))
-        schema_dict[vol.Optional(CONF_WINDOW_DELAY, default=get_opt(CONF_WINDOW_DELAY) or DEFAULT_WINDOW_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
-        
-        # System protections
-        schema_dict[vol.Optional(CONF_BOOT_DELAY, default=get_opt(CONF_BOOT_DELAY) or DEFAULT_BOOT_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10, step=1, mode="slider", unit_of_measurement="min"))
-        schema_dict[vol.Optional(CONF_MIN_RUN_TIME, default=get_opt(CONF_MIN_RUN_TIME) or DEFAULT_MIN_RUN_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=120, step=5, mode="slider", unit_of_measurement="min"))
-        schema_dict[vol.Optional(CONF_MIN_OFF_TIME, default=get_opt(CONF_MIN_OFF_TIME) or DEFAULT_MIN_OFF_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
-        
-        # Solar Configs
-        schema_dict[vol.Optional(CONF_SOLAR_DELAY, default=get_opt(CONF_SOLAR_DELAY) or DEFAULT_SOLAR_DELAY)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=60, step=1, mode="slider", unit_of_measurement="min"))
-        schema_dict[vol.Optional(CONF_SOLAR_BASE_THRESHOLD, default=get_opt(CONF_SOLAR_BASE_THRESHOLD) or DEFAULT_SOLAR_BASE_THRESHOLD)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10000, step=100, mode="slider", unit_of_measurement="W"))
-        schema_dict[vol.Optional(CONF_CONSUMPTION_THRESHOLD, default=get_opt(CONF_CONSUMPTION_THRESHOLD) or DEFAULT_CONSUMPTION_THRESHOLD)] = selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=10000, step=100, mode="slider", unit_of_measurement="W"))
-
-        win_val = get_list_opt(CONF_WINDOW_SENSORS)
-        win_key = vol.Optional(CONF_WINDOW_SENSORS, default=win_val) if win_val else vol.Optional(CONF_WINDOW_SENSORS)
-        schema_dict[win_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", multiple=True))
-
-        door_val = get_opt(CONF_DOOR_SENSOR)
-        door_key = vol.Optional(CONF_DOOR_SENSOR, default=door_val) if door_val else vol.Optional(CONF_DOOR_SENSOR)
-        schema_dict[door_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor"))
-
-        solar_val = get_opt(CONF_SOLAR_SENSOR)
-        solar_key = vol.Optional(CONF_SOLAR_SENSOR, default=solar_val) if solar_val else vol.Optional(CONF_SOLAR_SENSOR)
-        schema_dict[solar_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power"))
-
-        cons_val = get_opt(CONF_CONSUMPTION_SENSOR)
-        cons_key = vol.Optional(CONF_CONSUMPTION_SENSOR, default=cons_val) if cons_val else vol.Optional(CONF_CONSUMPTION_SENSOR)
-        schema_dict[cons_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power"))
-
-        if vent_enabled:
-            schema_dict[vol.Optional(CONF_CIRCULATE_INTERVAL, default=get_opt(CONF_CIRCULATE_INTERVAL) or DEFAULT_CIRCULATE_INTERVAL)] = selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=12, step=1, mode="slider", unit_of_measurement="h"))
-            schema_dict[vol.Optional(CONF_CIRCULATE_DURATION, default=get_opt(CONF_CIRCULATE_DURATION) or DEFAULT_CIRCULATE_DURATION)] = selector.NumberSelector(selector.NumberSelectorConfig(min=5, max=60, step=5, mode="slider", unit_of_measurement="min"))
-            schema_dict[vol.Optional(CONF_CIRCULATE_FAN_SPEED, default=get_opt(CONF_CIRCULATE_FAN_SPEED) or DEFAULT_CIRCULATE_FAN_SPEED)] = selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%"))
-
-            schema_dict[vol.Optional(CONF_HUMIDITY_THRESHOLD, default=get_opt(CONF_HUMIDITY_THRESHOLD) or DEFAULT_HUMIDITY_THRESHOLD)] = selector.NumberSelector(selector.NumberSelectorConfig(min=40, max=100, step=1, mode="slider", unit_of_measurement="%"))
-            schema_dict[vol.Optional(CONF_VENT_CYCLE_TIME, default=get_opt(CONF_VENT_CYCLE_TIME) or DEFAULT_VENT_CYCLE_TIME)] = selector.NumberSelector(selector.NumberSelectorConfig(min=30, max=300, step=5, mode="slider", unit_of_measurement="sec"))
-            schema_dict[vol.Optional(CONF_VENT_DURATION, default=get_opt(CONF_VENT_DURATION) or DEFAULT_VENT_DURATION)] = selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=240, step=5, mode="slider", unit_of_measurement="min"))
-            schema_dict[vol.Optional(CONF_VENT_FAN_SPEED, default=get_opt(CONF_VENT_FAN_SPEED) or DEFAULT_VENT_FAN_SPEED)] = selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=100, step=1, mode="slider", unit_of_measurement="%"))
-
-            fan_a_val = get_list_opt(CONF_FAN_GROUP_A)
-            fan_a_key = vol.Optional(CONF_FAN_GROUP_A, default=fan_a_val) if fan_a_val else vol.Optional(CONF_FAN_GROUP_A)
-            schema_dict[fan_a_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="fan", multiple=True))
-
-            fan_b_val = get_list_opt(CONF_FAN_GROUP_B)
-            fan_b_key = vol.Optional(CONF_FAN_GROUP_B, default=fan_b_val) if fan_b_val else vol.Optional(CONF_FAN_GROUP_B)
-            schema_dict[fan_b_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="fan", multiple=True))
-
-            hum_a_val = get_list_opt(CONF_HUMIDITY_SENSOR_A)
-            hum_a_key = vol.Optional(CONF_HUMIDITY_SENSOR_A, default=hum_a_val) if hum_a_val else vol.Optional(CONF_HUMIDITY_SENSOR_A)
-            schema_dict[hum_a_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True))
-
-            hum_b_val = get_list_opt(CONF_HUMIDITY_SENSOR_B)
-            hum_b_key = vol.Optional(CONF_HUMIDITY_SENSOR_B, default=hum_b_val) if hum_b_val else vol.Optional(CONF_HUMIDITY_SENSOR_B)
-            schema_dict[hum_b_key] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="humidity", multiple=True))
-
-        schema = vol.Schema(schema_dict)
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

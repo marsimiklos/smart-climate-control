@@ -1,0 +1,85 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Climate Control",
+        "description": "Válaszd ki a vezérelni kívánt entitásokat. A hőszivattyún és a szobaszenzoron kívül minden opcionális, és később a beállításokban módosítható.",
+        "data": {
+          "name": "Név",
+          "heat_pump": "Hőszivattyú / klíma entitás",
+          "room_sensor": "Szobahőmérséklet-szenzor",
+          "outside_sensor": "Külső hőmérséklet-szenzor",
+          "average_sensor": "Ház átlaghőmérséklet-szenzor",
+          "window_sensors": "Ablak / ajtó szenzorok",
+          "door_sensor": "Extra ajtószenzor",
+          "heat_pump_contact": "Hőszivattyú érintkező szenzor",
+          "presence_tracker": "Jelenlét-követő (távollétkor eco)",
+          "bed_sensors": "Ágyszenzorok (alvás közben eco)",
+          "solar_sensor": "Napelem termelés szenzor (W)",
+          "consumption_sensor": "Ház fogyasztás szenzor (W)",
+          "schedule": "Ütemező (bekapcsolva komfort, kikapcsolva eco, bekapcsolás előtt előfűt)",
+          "heat_pump_power_sensor": "Hőszivattyú teljesítményszenzor (W, energiabecsléshez)",
+          "arrival_zone": "Érkezési zóna (pl. a város: komfort, amint valaki belép, miközben senki nincs otthon)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Ezt a hőszivattyút már vezérli a Smart Climate Control"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smart Climate Control beállítások",
+        "description": "Egy entitásmező törlésével az adott szenzor használata megszűnik.",
+        "data": {
+          "outside_sensor": "Külső hőmérséklet-szenzor",
+          "average_sensor": "Ház átlaghőmérséklet-szenzor",
+          "window_sensors": "Ablak / ajtó szenzorok",
+          "door_sensor": "Extra ajtószenzor",
+          "heat_pump_contact": "Hőszivattyú érintkező szenzor",
+          "presence_tracker": "Jelenlét-követő (távollétkor eco)",
+          "bed_sensors": "Ágyszenzorok (alvás közben eco)",
+          "solar_sensor": "Napelem termelés szenzor (W)",
+          "consumption_sensor": "Ház fogyasztás szenzor (W)",
+          "enable_ventilation": "Szellőztetés (HRV) funkciók engedélyezése",
+          "cooling_eco_temp": "Hűtés eco hőmérséklet",
+          "deadband_below": "Holtsáv a célérték alatt",
+          "deadband_above": "Holtsáv a célérték felett",
+          "max_house_temp": "Maximális házhőmérséklet",
+          "low_temp_threshold": "Alacsony külső hőmérséklet küszöb",
+          "safety_cutoff": "Túlmelegedés elleni biztonsági tartalék",
+          "comfort_temp_offset": "Komfort fűtés eltolás",
+          "weather_comp_factor": "Időjárás-kompenzáció faktor",
+          "max_comp_temp": "Max kompenzált beállított érték",
+          "min_comp_temp": "Min kompenzált beállított érték",
+          "window_delay": "Ablaknyitás késleltetése",
+          "boot_delay": "Késleltetés a Home Assistant indulása után",
+          "min_run_time": "Minimális futásidő",
+          "min_off_time": "Minimális szünet",
+          "solar_delay": "Napelem-visszaesés késleltetése",
+          "solar_base_threshold": "Napelem alap küszöb",
+          "consumption_threshold": "Fogyasztás küszöb",
+          "circulate_interval": "Átforgatás időköze",
+          "circulate_duration": "Átforgatás időtartama",
+          "circulate_fan_speed": "Átforgatás ventilátor sebessége",
+          "humidity_threshold": "Páratartalom küszöb",
+          "vent_cycle_time": "Szellőztetés irányváltási ciklus",
+          "vent_duration": "Szellőztetés futásideje",
+          "vent_max_duration": "Szellőztetés maximális ideje",
+          "vent_auto_interval": "Automatikus szellőztetés időköze (0 = ki)",
+          "vent_fan_speed": "Szellőztetés ventilátor sebessége",
+          "fan_group_a": "A ventilátorcsoport",
+          "fan_group_b": "B ventilátorcsoport",
+          "humidity_sensor_a": "A páratartalom-szenzorok",
+          "humidity_sensor_b": "B páratartalom-szenzorok",
+          "schedule": "Ütemező (bekapcsolva komfort, kikapcsolva eco, bekapcsolás előtt előfűt)",
+          "heat_pump_power_sensor": "Hőszivattyú teljesítményszenzor (W, energiabecsléshez)",
+          "preheat_max_minutes": "Maximális előfűtési idő",
+          "rated_power": "Hőszivattyú átlagos teljesítménye működés közben (W, ha nincs teljesítményszenzor)",
+          "arrival_zone": "Érkezési zóna (pl. a város: komfort, amint valaki belép, miközben senki nincs otthon)"
+        }
+      }
+    }
+  }
+}
