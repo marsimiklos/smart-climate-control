@@ -1,13 +1,10 @@
-import logging
-import time
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import SmartClimateEntity
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
@@ -24,21 +21,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
         
     async_add_entities(sensors)
 
-class SmartClimateBaseSensor(SensorEntity):
-    _attr_has_entity_name = True
-    
+class SmartClimateBaseSensor(SmartClimateEntity, SensorEntity):
     def __init__(self, coordinator, config_entry, sensor_type, name):
-        self.coordinator = coordinator
+        super().__init__(coordinator, config_entry)
         self._attr_unique_id = f"{config_entry.entry_id}_{sensor_type}"
         self._attr_name = name
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, config_entry.entry_id)}, 
-            "name": config_entry.data.get("name", "Smart Climate")
-        }
-        
-    @property
-    def available(self): 
-        return True
 
 class SmartClimateStatusSensor(SmartClimateBaseSensor):
     def __init__(self, coordinator, config_entry):
@@ -46,8 +33,10 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
         self._attr_icon = "mdi:information-outline"
         
     @property
-    def state(self): 
-        return self.coordinator.debug_text if self.coordinator.smart_control_enabled else "Smart control disabled"
+    def native_value(self):
+        # A state can be at most 255 characters long
+        text = self.coordinator.debug_text if self.coordinator.smart_control_enabled else "Smart control disabled"
+        return text[:255]
         
     @property
     def extra_state_attributes(self):
@@ -58,6 +47,10 @@ class SmartClimateStatusSensor(SmartClimateBaseSensor):
             "active_logic_mode": self.coordinator.active_logic_mode,
             "window_open_active": self.coordinator.window_open_start is not None,
             "solar_sync_active": self.coordinator.solar_sync_enabled,
+            "solar_state": self.coordinator._solar_state,
+            "away": self.coordinator.is_away,
+            "sleep": self.coordinator.sleep_mode_active,
+            "open_windows": self.coordinator.open_window_details,
             "comfort_offset_applied": self.coordinator.comfort_offset_applied,
         }
 
@@ -67,22 +60,32 @@ class SmartClimateModeSensor(SmartClimateBaseSensor):
         self._attr_icon = "mdi:home-thermometer"
         
     @property
-    def state(self):
-        if not self.coordinator.smart_control_enabled: 
+    def native_value(self):
+        coordinator = self.coordinator
+        if not coordinator.smart_control_enabled:
             return "Disabled"
-        if self.coordinator.force_eco_mode or self.coordinator.sleep_mode_active: 
-            return "Force Eco" if self.coordinator.force_eco_mode else "Sleep Eco"
-        return "Force Comfort" if self.coordinator.override_mode else "Comfort"
+        if coordinator.boost_mode:
+            return "Boost"
+        if coordinator.override_mode or coordinator.force_comfort_mode:
+            return "Force Comfort"
+        if coordinator.force_eco_mode:
+            return "Force Eco"
+        if coordinator.sleep_mode_active:
+            return "Sleep Eco"
+        if coordinator.is_away:
+            return "Away Eco"
+        return "Comfort"
 
 class SmartClimateTargetSensor(SmartClimateBaseSensor):
     def __init__(self, coordinator, config_entry):
         super().__init__(coordinator, config_entry, "target_temp", "Target")
         self._attr_icon = "mdi:thermometer-plus"
+        self._attr_device_class = SensorDeviceClass.TEMPERATURE
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         self._attr_state_class = SensorStateClass.MEASUREMENT
         
     @property
-    def state(self): 
+    def native_value(self):
         target = self.coordinator.current_target_temp
         return round(target, 1) if target is not None else None
 
@@ -92,7 +95,7 @@ class SmartClimateVentStatusSensor(SmartClimateBaseSensor):
         self._attr_icon = "mdi:fan-clock"
         
     @property
-    def state(self):
+    def native_value(self):
         if not self.coordinator.vent_enabled: 
             return "Disabled"
         if self.coordinator.airout_is_running: 
@@ -114,6 +117,6 @@ class SmartClimateLogicModeSensor(SmartClimateBaseSensor):
         self._attr_icon = "mdi:thermostat-box"
         
     @property
-    def state(self):
+    def native_value(self):
         if not self.coordinator.smart_control_enabled: return "Off"
         return "Cooling" if self.coordinator.active_logic_mode == "cool" else "Heating"

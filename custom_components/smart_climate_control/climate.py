@@ -1,34 +1,29 @@
-import logging
-from typing import Any, List, Optional
+from typing import Any, Optional
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACMode, HVACAction
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import SmartClimateEntity
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    async_add_entities([SmartClimateEntity(coordinator, config_entry)])
+    async_add_entities([SmartClimateThermostat(coordinator, config_entry)])
 
-class SmartClimateEntity(ClimateEntity, RestoreEntity):
-    _attr_has_entity_name = True
+class SmartClimateThermostat(SmartClimateEntity, ClimateEntity):
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.AUTO]
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
 
     def __init__(self, coordinator, config_entry):
-        self.coordinator = coordinator
+        super().__init__(coordinator, config_entry)
         self._attr_unique_id = f"{config_entry.entry_id}_climate"
-        self._attr_device_info = {"identifiers": {(DOMAIN, config_entry.entry_id)}, "name": config_entry.data.get("name", "Smart Climate")}
 
     @property
     def current_temperature(self) -> Optional[float]:
-        room_sensor = self.coordinator.config.get("room_sensor")
+        room_sensor = self.coordinator._get_config_value("room_sensor")
         if not room_sensor: return None
         state = self.hass.states.get(room_sensor)
         if state and state.state not in ["unknown", "unavailable"]:
@@ -62,6 +57,8 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
             temp = kwargs[ATTR_TEMPERATURE]
             if self.coordinator.active_logic_mode == "cool":
                 self.coordinator.cooling_temp = temp
+            elif self.coordinator.boost_mode:
+                self.coordinator.boost_temp = temp
             elif self.coordinator.force_eco_mode:
                 self.coordinator.eco_temp = temp
             else:
@@ -75,9 +72,7 @@ class SmartClimateEntity(ClimateEntity, RestoreEntity):
         else:
             if not self.coordinator.smart_control_enabled:
                 await self.coordinator.enable_smart_control(True)
-            if hvac_mode in [HVACMode.HEAT, HVACMode.COOL, HVACMode.AUTO]:
-                self._attr_last_active_mode = hvac_mode
-                
+            self.coordinator.boost_mode = False
             if hvac_mode == HVACMode.HEAT:
                 self.coordinator.current_hvac_mode = "heat"
                 self.coordinator.override_mode = True 

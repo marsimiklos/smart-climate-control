@@ -1,11 +1,9 @@
-import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import SmartClimateEntity
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
@@ -14,6 +12,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
     switches = [
         SmartClimateOverrideSwitch(coordinator, config_entry),
         SmartClimateForceEcoSwitch(coordinator, config_entry),
+        SmartClimateBoostSwitch(coordinator, config_entry),
         SmartClimateEnableSwitch(coordinator, config_entry),
         SmartClimateFreeCoolingSwitch(coordinator, config_entry),
         SmartClimateSolarSwitch(coordinator, config_entry),
@@ -30,15 +29,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
         
     async_add_entities(switches)
 
-class SmartClimateBaseSwitch(SwitchEntity):
-    _attr_has_entity_name = True
+class SmartClimateBaseSwitch(SmartClimateEntity, SwitchEntity):
     def __init__(self, coordinator, config_entry, switch_type, name):
-        self.coordinator = coordinator
+        super().__init__(coordinator, config_entry)
         self._attr_unique_id = f"{config_entry.entry_id}_{switch_type}"
         self._attr_name = name
-        self._attr_device_info = {"identifiers": {(DOMAIN, config_entry.entry_id)}, "name": config_entry.data.get("name", "Smart Climate")}
-    @property
-    def available(self): return True
 
 class SmartClimateEnableSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):
@@ -56,7 +51,7 @@ class SmartClimateOverrideSwitch(SmartClimateBaseSwitch):
     @property
     def is_on(self): return self.coordinator.override_mode
     async def async_turn_on(self, **kwargs):
-        self.coordinator.override_mode, self.coordinator.force_eco_mode = True, False
+        self.coordinator.override_mode, self.coordinator.force_eco_mode, self.coordinator.boost_mode = True, False, False
         await self.coordinator.async_update()
     async def async_turn_off(self, **kwargs):
         self.coordinator.override_mode = False; await self.coordinator.async_update()
@@ -68,10 +63,22 @@ class SmartClimateForceEcoSwitch(SmartClimateBaseSwitch):
     @property
     def is_on(self): return self.coordinator.force_eco_mode
     async def async_turn_on(self, **kwargs):
-        self.coordinator.force_eco_mode, self.coordinator.override_mode = True, False
+        self.coordinator.force_eco_mode, self.coordinator.override_mode, self.coordinator.boost_mode = True, False, False
         await self.coordinator.async_update()
     async def async_turn_off(self, **kwargs):
         self.coordinator.force_eco_mode = False; await self.coordinator.async_update()
+
+class SmartClimateBoostSwitch(SmartClimateBaseSwitch):
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "boost", "Force Boost Mode")
+        self._attr_icon = "mdi:rocket-launch-outline"
+    @property
+    def is_on(self): return self.coordinator.boost_mode
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.boost_mode, self.coordinator.override_mode, self.coordinator.force_eco_mode = True, False, False
+        await self.coordinator.async_update()
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.boost_mode = False; await self.coordinator.async_update()
 
 class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):
@@ -99,8 +106,8 @@ class SmartClimateAiroutSwitch(SmartClimateBaseSwitch):
         self._attr_icon = "mdi:weather-windy"
     @property
     def is_on(self): return self.coordinator.airout_is_running and self.coordinator.vent_reason != "Free Cooling"
-    async def async_turn_on(self, **kwargs): await self.coordinator.start_airout(reason="Manual Switch"); self.async_write_ha_state()
-    async def async_turn_off(self, **kwargs): await self.coordinator.stop_airout("Manual Switch Off"); self.async_write_ha_state()
+    async def async_turn_on(self, **kwargs): await self.coordinator.start_airout(reason="Manual Switch")
+    async def async_turn_off(self, **kwargs): await self.coordinator.stop_airout("Manual Switch Off")
 
 class SmartClimateFreeCoolingSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):
@@ -109,9 +116,9 @@ class SmartClimateFreeCoolingSwitch(SmartClimateBaseSwitch):
     @property
     def is_on(self): return self.coordinator.free_cooling_enabled
     async def async_turn_on(self, **kwargs):
-        self.coordinator.free_cooling_enabled = True; await self.coordinator.async_save_state(); self.async_write_ha_state()
+        self.coordinator.free_cooling_enabled = True; await self.coordinator.async_save_state()
     async def async_turn_off(self, **kwargs):
-        self.coordinator.free_cooling_enabled = False; await self.coordinator.async_save_state(); self.async_write_ha_state()
+        self.coordinator.free_cooling_enabled = False; await self.coordinator.async_save_state()
 
 class SmartClimateSolarSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):
@@ -120,9 +127,9 @@ class SmartClimateSolarSwitch(SmartClimateBaseSwitch):
     @property
     def is_on(self): return self.coordinator.solar_sync_enabled
     async def async_turn_on(self, **kwargs):
-        self.coordinator.solar_sync_enabled = True; await self.coordinator.async_save_state(); self.async_write_ha_state()
+        self.coordinator.solar_sync_enabled = True; await self.coordinator.async_save_state()
     async def async_turn_off(self, **kwargs):
-        self.coordinator.solar_sync_enabled = False; await self.coordinator.async_save_state(); self.async_write_ha_state()
+        self.coordinator.solar_sync_enabled = False; await self.coordinator.async_save_state()
 
 class SmartClimateCirculateSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):
@@ -131,10 +138,9 @@ class SmartClimateCirculateSwitch(SmartClimateBaseSwitch):
     @property
     def is_on(self): return self.coordinator.circulate_enabled
     async def async_turn_on(self, **kwargs):
-        self.coordinator.circulate_enabled = True; await self.coordinator.async_save_state(); self.async_write_ha_state()
+        self.coordinator.circulate_enabled = True; await self.coordinator.async_save_state()
     async def async_turn_off(self, **kwargs):
         self.coordinator.circulate_enabled = False
         if self.coordinator.circulate_is_running:
             await self.coordinator._stop_circulation()
         await self.coordinator.async_save_state()
-        self.async_write_ha_state()
