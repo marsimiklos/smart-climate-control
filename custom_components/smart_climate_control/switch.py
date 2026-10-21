@@ -13,6 +13,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, asyn
         SmartClimateOverrideSwitch(coordinator, config_entry),
         SmartClimateForceEcoSwitch(coordinator, config_entry),
         SmartClimateBoostSwitch(coordinator, config_entry),
+        SmartClimateForceHeatingSwitch(coordinator, config_entry),
+        SmartClimateScheduleSwitch(coordinator, config_entry),
+        SmartClimatePreheatSwitch(coordinator, config_entry),
         SmartClimateEnableSwitch(coordinator, config_entry),
         SmartClimateFreeCoolingSwitch(coordinator, config_entry),
         SmartClimateSolarSwitch(coordinator, config_entry),
@@ -79,6 +82,44 @@ class SmartClimateBoostSwitch(SmartClimateBaseSwitch):
         await self.coordinator.async_update()
     async def async_turn_off(self, **kwargs):
         self.coordinator.boost_mode = False; await self.coordinator.async_update()
+
+class SmartClimateForceHeatingSwitch(SmartClimateBaseSwitch):
+    """Heat continuously at the current target, ignoring the deadband."""
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "force_heating", "Force Heating")
+        self._attr_icon = "mdi:fire"
+    @property
+    def is_on(self): return self.coordinator.force_heating
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.force_heating = True; await self.coordinator.async_update()
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.force_heating = False; await self.coordinator.async_update()
+
+class SmartClimateScheduleSwitch(SmartClimateBaseSwitch):
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "schedule_enabled", "Schedule Control")
+        self._attr_icon = "mdi:calendar-clock"
+    @property
+    def is_on(self): return self.coordinator.schedule_enabled
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.schedule_enabled = True
+        await self.coordinator.async_save_state(); await self.coordinator.async_update()
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.schedule_enabled = False
+        await self.coordinator.async_save_state(); await self.coordinator.async_update()
+
+class SmartClimatePreheatSwitch(SmartClimateBaseSwitch):
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator, config_entry, "preheat_enabled", "Preheat")
+        self._attr_icon = "mdi:clock-start"
+    @property
+    def is_on(self): return self.coordinator.preheat_enabled
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.preheat_enabled = True
+        await self.coordinator.async_save_state(); await self.coordinator.async_update()
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.preheat_enabled = False
+        await self.coordinator.async_save_state(); await self.coordinator.async_update()
 
 class SmartClimateVentEnableSwitch(SmartClimateBaseSwitch):
     def __init__(self, coordinator, config_entry):

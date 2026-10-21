@@ -16,7 +16,9 @@
           "presence_tracker": "Presence tracker (eco when away)",
           "bed_sensors": "Bed sensors (eco while sleeping)",
           "solar_sensor": "Solar production sensor (W)",
-          "consumption_sensor": "House consumption sensor (W)"
+          "consumption_sensor": "House consumption sensor (W)",
+          "schedule": "Schedule (comfort while on, eco while off, pre-heats before it turns on)",
+          "heat_pump_power_sensor": "Heat pump power sensor (W, for energy estimate)"
         }
       }
     },
@@ -69,7 +71,11 @@
           "fan_group_a": "Fan group A",
           "fan_group_b": "Fan group B",
           "humidity_sensor_a": "Humidity sensors A",
-          "humidity_sensor_b": "Humidity sensors B"
+          "humidity_sensor_b": "Humidity sensors B",
+          "schedule": "Schedule (comfort while on, eco while off, pre-heats before it turns on)",
+          "heat_pump_power_sensor": "Heat pump power sensor (W, for energy estimate)",
+          "preheat_max_minutes": "Maximum pre-heat time",
+          "rated_power": "Heat pump average power when running (W, if no power sensor)"
         }
       }
     }

@@ -20,8 +20,15 @@ This is a fork of [smartthings54/smart-climate-control](https://github.com/smart
 - Heating and cooling with **AUTO** mode (picks heat or cool from the outside temperature, falls back to the room temperature)
 - Deadband control to prevent rapid cycling, plus minimum run time and minimum off time for the compressor
 - Presets: Comfort, Eco and Boost for heating, Comfort and Eco for cooling
+- **Weekly schedule with learned pre-heating**: comfort while a Home Assistant `schedule` is on, eco while it is off, and the house is warm *when* the schedule turns on (see below)
 - Weather compensation for freezing days (heating only)
 - Whole-house maximum temperature safety limit (heating)
+
+**Diagnostics and statistics**
+
+- Daily runtime, number of on/off cycles, average run length and estimated electric energy (usable in the Energy dashboard)
+- A diagnosis sensor that tells you when the heat pump is short-cycling, so you know the deadband is too small
+- The learned heating rate of your house per outside temperature
 
 **Solar sync ("thermal battery")**
 
@@ -79,6 +86,8 @@ Copy `custom_components/smart_climate_control` to `config/custom_components/` an
 | Presence tracker | no | Eco when away (`person`, `device_tracker`, `binary_sensor`, `input_boolean`, `group`) |
 | Bed sensors | no | Eco while sleeping |
 | Solar production sensor (W) / consumption sensor (W) | no | Solar sync |
+| Schedule (`schedule` helper) | no | Comfort / eco times and pre-heating |
+| Heat pump power sensor (W) | no | Real energy statistics (otherwise the *rated power* from the options is used) |
 | Fan groups and humidity sensors | no | Ventilation |
 
 The heat pump entity is shown under the integration's device. The original assignment is restored if you remove the integration.
@@ -90,16 +99,32 @@ The names below assume the default name `Smart Climate`.
 | Platform | Entities |
 | --- | --- |
 | `climate` | Thermostat with OFF / HEAT / COOL / AUTO |
-| `switch` | Climate Management, Force Comfort Mode, Force Eco Mode, Force Boost Mode, Auto Free Cooling, Solar Sync, Periodic Fan Circulation, Ventilation Enabled, Ventilation Manual Run, Airout |
+| `switch` | Climate Management, Force Comfort Mode, Force Eco Mode, Force Boost Mode, Force Heating, Schedule Control, Preheat, Auto Free Cooling, Solar Sync, Periodic Fan Circulation, Ventilation Enabled, Ventilation Manual Run, Airout |
 | `select` | Operating Mode (auto / heat / cool), Airout Direction |
-| `sensor` | Status, Mode, Target, Active Logic, Ventilation Status |
+| `sensor` | Status, Mode, Target, Active Logic, Ventilation Status, Runtime Today, Cycles Today, Estimated Energy Today, Average Run Length Today, Cycle Diagnosis, Learned Heating Rate, Preheat Start |
 | `number` | Boost / Comfort / Eco / Cooling / Cooling Eco temperatures, humidity threshold, ventilation timings and speed, airout and free cooling limits, solar thresholds, offset and delay |
 
 ### Which target is used
 
-From highest to lowest priority: **Boost** (heating only) → **Force Comfort** → **Force Eco**, **sleeping** or **away** → **Comfort**.
+From highest to lowest priority: **Boost** (heating only) → **Force Comfort** → **Force Eco**, **sleeping**, **away** or **schedule off** → **Comfort** (also while **pre-heating**).
 
-> Choosing **HEAT** on the thermostat is a manual override: it uses the comfort target and keeps heating, **bypassing the deadband**. Use **AUTO** (or the Operating Mode select) if you want the full deadband logic and presence / sleep detection.
+HEAT, COOL and AUTO all use the deadband. **Force Heating** is a separate switch: it keeps heating continuously at the current target and ignores the deadband (the house temperature limit, the window pause and the compressor minimum times still apply).
+
+## Schedule and pre-heating
+
+Create a schedule helper (**Settings → Devices & services → Helpers → Schedule**) with the times you want the house comfortable, and select it in the integration options.
+
+- Schedule **on** → comfort target. Schedule **off** → eco target.
+- Shortly before the schedule turns on, heating starts early so the room *reaches* the comfort temperature at that moment. The start time is `time = (comfort − room) / heating rate × 1.1`, capped by *Maximum pre-heat time* (default 180 min). The **Preheat Start** sensor shows the predicted start.
+- The **heating rate** (°C/h) is learned from your own house: whenever the heat pump runs for at least 20 minutes with a real gap to the target, the observed temperature rise is stored in a moving average per outside temperature range. Until something has been learned, 1 °C/h is assumed, so the first mornings start a bit early or late. Use the **Learned Heating Rate** sensor to follow it.
+- Pre-heating is skipped when nobody is home, when heating is not the active mode, or when the **Preheat** switch is off. Switch **Schedule Control** off to ignore the schedule completely. If the schedule entity is unavailable, the normal behaviour continues.
+- Other rules still win: Boost, Force Comfort and Force Eco override the schedule.
+
+## Statistics and diagnosis
+
+- **Runtime Today / Cycles Today / Average Run Length Today** are reset at midnight. Yesterday and the last 14 days are in the sensor attributes.
+- **Estimated Energy Today** uses the heat pump power sensor if you set one, otherwise the *average power when running* from the options. Without either it is unavailable.
+- **Cycle Diagnosis** is `short_cycling` when, over yesterday and today, there are at least 4 cycles with an average run shorter than 10 minutes. Then increase the deadband or the minimum run time.
 
 ## Services
 

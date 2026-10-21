@@ -23,6 +23,10 @@ CONF_WEATHER_COMP_FACTOR = "weather_comp_factor"
 CONF_MAX_COMP_TEMP = "max_comp_temp"
 CONF_MIN_COMP_TEMP = "min_comp_temp"
 CONF_COMFORT_OFFSET = "comfort_temp_offset"
+CONF_SCHEDULE = "schedule"
+CONF_PREHEAT_MAX_MINUTES = "preheat_max_minutes"
+CONF_HEAT_PUMP_POWER_SENSOR = "heat_pump_power_sensor"
+CONF_RATED_POWER = "rated_power"
 CONF_MIN_RUN_TIME = "min_run_time"
 CONF_MIN_OFF_TIME = "min_off_time"
 CONF_BOOT_DELAY = "boot_delay"
@@ -108,3 +112,7 @@ HUMIDITY_LOCK_MIN_OUTSIDE = 15.0
 
 # Presence tracker states that mean "nobody is home"
 AWAY_STATES = ("not_home", "away", "off")
+
+DEFAULT_PREHEAT_MAX_MINUTES = 180
+DEFAULT_RATED_POWER = 0
+

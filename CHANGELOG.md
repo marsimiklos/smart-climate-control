@@ -2,6 +2,16 @@
 
 This fork continues from the original project's v3.0.
 
+## 3.2.0
+
+### Added
+- Schedule support with **learned pre-heating**: the house reaches the comfort temperature when the schedule turns on. The heating rate is learned per outside temperature. New sensors *Learned Heating Rate* and *Preheat Start*, switches *Schedule Control* and *Preheat*.
+- Statistics and diagnosis: *Runtime Today*, *Cycles Today*, *Estimated Energy Today*, *Average Run Length Today* and *Cycle Diagnosis* (detects short cycling). Optional heat pump power sensor or rated power for the energy estimate.
+- *Force Heating* switch.
+
+### Changed
+- **HEAT now follows the deadband** like AUTO does. It used to heat continuously, bypassing the deadband. That behaviour moved to the separate *Force Heating* switch. *Force Comfort Mode* only selects the comfort target now.
+
 ## 3.1.0
 
 ### Fixed

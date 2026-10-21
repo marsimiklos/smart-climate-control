@@ -75,7 +75,7 @@ class SmartClimateThermostat(SmartClimateEntity, ClimateEntity):
             self.coordinator.boost_mode = False
             if hvac_mode == HVACMode.HEAT:
                 self.coordinator.current_hvac_mode = "heat"
-                self.coordinator.override_mode = True 
+                self.coordinator.override_mode = False
                 self.coordinator.force_eco_mode = False
             elif hvac_mode == HVACMode.COOL:
                 self.coordinator.current_hvac_mode = "cool"

@@ -2,11 +2,13 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timedelta
 from typing import Any, Callable, List, Optional, Union
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     SERVICE_TURN_OFF,
+    STATE_OFF,
     STATE_ON,
     STATE_OPEN,
 )
@@ -14,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN, CONF_HEAT_PUMP, CONF_ROOM_SENSOR, CONF_OUTSIDE_SENSOR,
@@ -45,7 +48,11 @@ from .const import (
     CONF_FREE_COOLING_MAX_DURATION, CONF_FREE_COOLING_COOLDOWN,
     DEFAULT_FREE_COOLING_MAX_DURATION, DEFAULT_FREE_COOLING_COOLDOWN,
     CONF_COMFORT_OFFSET, FALLBACK_OUTSIDE_TEMP, HUMIDITY_LOCK_MIN_OUTSIDE, AWAY_STATES,
+    CONF_SCHEDULE, CONF_PREHEAT_MAX_MINUTES, DEFAULT_PREHEAT_MAX_MINUTES,
+    CONF_HEAT_PUMP_POWER_SENSOR, CONF_RATED_POWER, DEFAULT_RATED_POWER,
 )
+from .stats import RunStats
+from .thermal import ThermalModel, WarmupTracker
 from .logic import (
     WindowTracker, choose_logic_mode, next_solar_state, weather_compensation_offset,
 )
@@ -69,6 +76,18 @@ class SmartClimateCoordinator:
         self.force_eco_mode = False
         self.force_comfort_mode = False
         self.boost_mode = False
+        self.force_heating = False
+        self.schedule_enabled = True
+        self.preheat_enabled = True
+        self.schedule_eco_active = False
+        self.preheat_active = False
+        self.preheat_start: Optional[datetime] = None
+        self.preheat_minutes: Optional[int] = None
+        self._preheat_event: Optional[str] = None
+        self.last_outside_temp = FALLBACK_OUTSIDE_TEMP
+        self.stats = RunStats()
+        self.thermal = ThermalModel()
+        self._warmup = WarmupTracker()
         self.current_action = "off"
         self.current_hvac_mode = "auto"
         self.active_logic_mode = "heat"
@@ -201,6 +220,13 @@ class SmartClimateCoordinator:
     def circulate_fan_speed(self) -> float: return self._get_config_value(CONF_CIRCULATE_FAN_SPEED, DEFAULT_CIRCULATE_FAN_SPEED)
 
     @property
+    def has_schedule(self) -> bool: return bool(self._get_config_value(CONF_SCHEDULE))
+    @property
+    def preheat_max_minutes(self) -> float: return self._get_config_value(CONF_PREHEAT_MAX_MINUTES, DEFAULT_PREHEAT_MAX_MINUTES)
+    @property
+    def rated_power(self) -> float: return self._get_config_value(CONF_RATED_POWER, DEFAULT_RATED_POWER)
+
+    @property
     def is_away(self) -> bool:
         tracker = self._get_config_value(CONF_PRESENCE_TRACKER)
         if not tracker:
@@ -211,7 +237,7 @@ class SmartClimateCoordinator:
     @property
     def is_comfort_mode_active(self) -> bool:
         if self.boost_mode or self.force_comfort_mode or self.override_mode: return True
-        if self.force_eco_mode or self.sleep_mode_active or self.is_away: return False
+        if self.force_eco_mode or self.sleep_mode_active or self.is_away or self.schedule_eco_active: return False
         return True
 
     # Option keys that map onto runtime values (which are also adjustable via number entities)
@@ -308,6 +334,11 @@ class SmartClimateCoordinator:
             "circulate_enabled": self.circulate_enabled,
             "last_cooling_active_time": self.last_cooling_active_time,
             "original_heat_pump_device_id": self.original_heat_pump_device_id,
+            "schedule_enabled": self.schedule_enabled,
+            "preheat_enabled": self.preheat_enabled,
+            "preheat_event": self._preheat_event,
+            "stats": self.stats.to_dict(),
+            "thermal": self.thermal.to_dict(),
         })
         # Every user-facing setter persists its change, so this keeps the entities in sync
         self._notify_listeners()
@@ -349,6 +380,11 @@ class SmartClimateCoordinator:
             self.circulate_enabled = stored_data.get("circulate_enabled", False)
             self.last_cooling_active_time = stored_data.get("last_cooling_active_time", time.time())
             self.original_heat_pump_device_id = stored_data.get("original_heat_pump_device_id")
+            self.schedule_enabled = stored_data.get("schedule_enabled", True)
+            self.preheat_enabled = stored_data.get("preheat_enabled", True)
+            self._preheat_event = stored_data.get("preheat_event")
+            self.stats = RunStats.from_dict(stored_data.get("stats"))
+            self.thermal = ThermalModel.from_dict(stored_data.get("thermal"))
 
         await self._setup_state_listeners()
         _LOGGER.info(f"Smart Climate initialized. Vent enabled: {self.vent_enabled}")
@@ -368,7 +404,7 @@ class SmartClimateCoordinator:
         
         # Add temperature & power sensors for immediate reaction
         for key in [CONF_ROOM_SENSOR, CONF_OUTSIDE_SENSOR, CONF_AVERAGE_SENSOR, CONF_SOLAR_SENSOR,
-                    CONF_CONSUMPTION_SENSOR, CONF_PRESENCE_TRACKER]:
+                    CONF_CONSUMPTION_SENSOR, CONF_PRESENCE_TRACKER, CONF_SCHEDULE]:
             sensor_id = self._get_config_value(key, None)
             if sensor_id and sensor_id not in listen_sensors:
                 listen_sensors.append(sensor_id)
@@ -624,7 +660,7 @@ class SmartClimateCoordinator:
         
         if not is_cooling and self.boost_mode: return self.boost_temp
         if self.override_mode or self.force_comfort_mode: return comf
-        if self.force_eco_mode or self.sleep_mode_active or self.is_away: return eco
+        if self.force_eco_mode or self.sleep_mode_active or self.is_away or self.schedule_eco_active: return eco
         return comf
     
     async def _calculate_heating_control(self, room_temp: Optional[float], outside_temp: float, avg_house_temp: Optional[float], base_temp: float, window_open_stop: bool, is_solar_active: bool, applied_solar_offset: float) -> tuple[str, Optional[float], str]:
@@ -632,7 +668,6 @@ class SmartClimateCoordinator:
         if self.last_heat_pump_start and (time.time() - self.last_heat_pump_start) < self.min_runtime: return "on", base_temp, "Minimum runtime active"
         if self.last_heat_pump_stop and (time.time() - self.last_heat_pump_stop) < self.min_off_time: 
             return "off", base_temp, f"Min off-time active ({int((self.min_off_time - (time.time() - self.last_heat_pump_stop))/60)}m left)"
-        if self.override_mode: return "on", base_temp, "Manual override (deadband bypassed)"
         
         if avg_house_temp is not None:
             if self.last_avg_house_over_limit:
@@ -642,7 +677,9 @@ class SmartClimateCoordinator:
             else: self.last_avg_house_over_limit = False
                 
         if room_temp is None: return "off", base_temp, "No room temp data"
-        
+
+        if self.force_heating: return "on", base_temp, "Forced heating (deadband bypassed)"
+
         if is_solar_active:
             target = base_temp + applied_solar_offset
             offset_msg = f" (+{applied_solar_offset:.1f}°C)" if applied_solar_offset > 0 else " (base temperature)"
@@ -700,6 +737,7 @@ class SmartClimateCoordinator:
             except Exception as e:
                 _LOGGER.exception("Error in climate control update")
                 self.debug_text = f"Error: {e}"
+        self._record_stats()
         self._notify_listeners()
         if self._update_pending:
             await self.async_update()
@@ -719,6 +757,7 @@ class SmartClimateCoordinator:
         room_temp = await self._get_sensor_value(self._get_config_value(CONF_ROOM_SENSOR))
         outside_raw = await self._get_sensor_value(self._get_config_value(CONF_OUTSIDE_SENSOR))
         outside_temp = outside_raw if outside_raw is not None else FALLBACK_OUTSIDE_TEMP
+        self.last_outside_temp = outside_temp
         window_open_stop = await self._check_window_status()
 
         self.active_logic_mode = choose_logic_mode(
@@ -750,6 +789,8 @@ class SmartClimateCoordinator:
         is_solar_active = self._solar_state in ["base", "offset"]
         applied_solar_offset = self.solar_offset if self._solar_state == "offset" else 0.0
         # ----------------------------------------
+
+        self._evaluate_schedule(room_temp, outside_temp)
 
         self.min_runtime_remaining_minutes = 0
         self.min_off_remaining_minutes = 0
@@ -832,6 +873,8 @@ class SmartClimateCoordinator:
 
             self.debug_text = self._format_debug_text(action, temperature, room_temp, None, None, reason, None, 0, False, "cool")
         
+        await self._learn_heating_rate(action, room_temp, outside_temp)
+
         # Check for transitioning to OFF to start Min Off-Time counter
         if action == "off" and self.current_action != "off":
             self.last_heat_pump_stop = time.time()
@@ -851,6 +894,72 @@ class SmartClimateCoordinator:
             "min_runtime_remaining_minutes": self.min_runtime_remaining_minutes,
             "min_off_remaining_minutes": self.min_off_remaining_minutes
         })
+
+    def _evaluate_schedule(self, room_temp: Optional[float], outside_temp: float) -> None:
+        """Decide whether the schedule asks for eco and whether pre-heating must start.
+
+        Schedule on  = comfort time.
+        Schedule off = eco, except while pre-heating towards the next comfort time.
+        """
+        self.schedule_eco_active = False
+        self.preheat_active = False
+        self.preheat_minutes = None
+
+        schedule_id = self._get_config_value(CONF_SCHEDULE)
+        state = self.hass.states.get(schedule_id) if schedule_id and self.schedule_enabled else None
+        if state is None or state.state != STATE_OFF:
+            # On means comfort time. Anything else (unavailable, ...) keeps the normal behaviour.
+            self._preheat_event = None
+            self.preheat_start = None
+            return
+
+        self.schedule_eco_active = True
+        next_event = state.attributes.get("next_event")
+        if (self.active_logic_mode != "heat" or not self.preheat_enabled or self.is_away
+                or room_temp is None or not isinstance(next_event, datetime)):
+            self.preheat_start = None
+            return
+
+        event_id = next_event.isoformat()
+        if self._preheat_event == event_id:
+            # Once started, pre-heating continues until the comfort time (otherwise the shrinking
+            # estimate would stop it again as soon as the room warms up)
+            self.preheat_active, self.schedule_eco_active = True, False
+            return
+
+        minutes = self.thermal.preheat_minutes(self.comfort_temp - room_temp, outside_temp, self.preheat_max_minutes)
+        self.preheat_minutes = minutes
+        start = next_event - timedelta(minutes=minutes)
+        self.preheat_start = start if minutes > 0 else None
+        now = dt_util.utcnow()
+        if minutes > 0 and now >= start:
+            self._preheat_event = event_id
+            self.preheat_start = now
+            self.preheat_active, self.schedule_eco_active = True, False
+
+    async def _learn_heating_rate(self, action: str, room_temp: Optional[float], outside_temp: float) -> None:
+        heating = action == "on" and self.active_logic_mode == "heat"
+        observation = self._warmup.update(time.time(), heating, room_temp, outside_temp, self.current_target_temp)
+        if observation:
+            rate, outside_mean = observation
+            self.thermal.observe(outside_mean, rate)
+            _LOGGER.debug("Learned heating rate %.2f °C/h at %.1f °C outside", rate, outside_mean)
+            await self.async_save_state()
+
+    def _record_stats(self) -> None:
+        running = self.smart_control_enabled and self.current_action == "on"
+        power = None
+        if running:
+            sensor = self._get_config_value(CONF_HEAT_PUMP_POWER_SENSOR)
+            if sensor:
+                state = self.hass.states.get(sensor)
+                try:
+                    power = float(state.state) if state else None
+                except ValueError:
+                    power = None
+            if power is None and self.rated_power:
+                power = self.rated_power
+        self.stats.record(time.time(), dt_util.now().date().isoformat(), running, power)
 
     async def _control_heat_pump_directly(self, action: str, temperature: Optional[float], hvac_mode: str, bypass_protection: bool = False) -> None:
         if action == self.last_sent_action and temperature == self.last_sent_temperature and hvac_mode == self.last_sent_hvac_mode: return
@@ -933,6 +1042,7 @@ class SmartClimateCoordinator:
         if self.hass.states.get(self.heat_pump_entity_id):
              await self.hass.services.async_call("climate", "turn_off", {"entity_id": self.heat_pump_entity_id}, blocking=False)
         self.smart_control_active = False
+        self._warmup.update(time.time(), False, None, 0.0, 0.0)
         self.last_sent_action = None
         self.current_action = "off"
         self.debug_text = "Smart control disabled"
@@ -997,7 +1107,8 @@ class SmartClimateCoordinator:
         if action == "off": return f"OFF | R: {room_str}°C | H: {avg_str}°C | O: {outside_str} | {reason}{rt_info}"
         if self.boost_mode: mode_str = "Boost"
         elif self.override_mode or self.force_comfort_mode: mode_str = "Force Comfort"
-        elif self.force_eco_mode or self.sleep_mode_active or self.is_away: mode_str = "Eco"
+        elif self.force_eco_mode or self.sleep_mode_active or self.is_away or self.schedule_eco_active: mode_str = "Eco"
+        elif self.preheat_active: mode_str = "Preheat"
         else: mode_str = "Comfort"
         temp_str = f"{temperature}°C (B:{original_temperature} +{weather_compensation})" if weather_compensation > 0 else f"{temperature}°C"
         return f"ON | {mode_str} {temp_str} | R: {room_str}°C | H: {avg_str}°C | O: {outside_str} | {reason}{rt_info}"

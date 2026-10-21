@@ -1,7 +1,9 @@
 """Integration tests against a real (test) Home Assistant instance."""
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_mock_service
 
 from custom_components.smart_climate_control.const import (
@@ -130,3 +132,103 @@ async def test_trigger_ventilation_does_not_overwrite_default_duration(hass: Hom
     assert coordinator.vent_is_running
     assert coordinator.vent_active_duration == 5
     assert coordinator.vent_run_duration == default
+
+
+async def test_heat_mode_respects_the_deadband(hass: HomeAssistant):
+    """HEAT used to bypass the deadband; only Force Heating does that now."""
+    _, coordinator, _ = await _setup(hass)
+    await hass.services.async_call(
+        "climate", "set_hvac_mode", {"entity_id": "climate.smart_climate", "hvac_mode": "heat"}, blocking=True
+    )
+    hass.states.async_set(ROOM, "19.8", {"device_class": "temperature"})  # inside the 19.5..20.5 deadband
+    await coordinator.async_update()
+    assert coordinator.current_action == "off"
+    assert "deadband" in coordinator.debug_text.lower()
+
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.smart_climate_force_heating"}, blocking=True)
+    assert coordinator.force_heating is True
+    assert coordinator.current_action == "on"
+    assert "Forced heating" in coordinator.debug_text
+
+
+async def _setup_with_schedule(hass: HomeAssistant, next_event, state="off", room="17.0"):
+    hass.states.async_set("schedule.home", state, {"next_event": next_event})
+    entry, coordinator, calls = await _setup(hass, schedule="schedule.home")
+    hass.states.async_set(ROOM, room, {"device_class": "temperature"})
+    return entry, coordinator, calls
+
+
+async def test_schedule_off_means_eco(hass: HomeAssistant):
+    _, coordinator, _ = await _setup_with_schedule(hass, dt_util.utcnow() + timedelta(hours=10))
+    await coordinator.async_update()
+    assert coordinator.schedule_eco_active is True
+    assert coordinator.preheat_active is False
+    assert coordinator._determine_base_temperature(False) == coordinator.eco_temp
+    assert coordinator.preheat_start is not None  # predicted, in the future
+    assert coordinator.preheat_start > dt_util.utcnow()
+
+
+async def test_schedule_on_means_comfort(hass: HomeAssistant):
+    _, coordinator, _ = await _setup_with_schedule(hass, dt_util.utcnow() + timedelta(hours=1), state="on")
+    await coordinator.async_update()
+    assert coordinator.schedule_eco_active is False
+    assert coordinator._determine_base_temperature(False) == coordinator.comfort_temp
+
+
+async def test_preheat_starts_in_time_and_stays_on(hass: HomeAssistant):
+    event = dt_util.utcnow() + timedelta(minutes=60)
+    _, coordinator, _ = await _setup_with_schedule(hass, event)
+    coordinator.thermal.observe(5.0, 1.0)  # 1 °C/h -> 3 °C needs ~3.3 h, capped at 180 min
+
+    await coordinator.async_update()
+    assert coordinator.preheat_active is True
+    assert coordinator._determine_base_temperature(False) == coordinator.comfort_temp
+
+    # The room warms up, the estimate shrinks, pre-heating must not stop
+    hass.states.async_set(ROOM, "19.9", {"device_class": "temperature"})
+    await coordinator.async_update()
+    assert coordinator.preheat_active is True
+
+    # Comfort time reached: schedule turns on
+    hass.states.async_set("schedule.home", "on", {"next_event": event + timedelta(hours=8)})
+    await coordinator.async_update()
+    assert coordinator.preheat_active is False and coordinator.schedule_eco_active is False
+    assert coordinator._preheat_event is None
+
+
+async def test_no_preheat_when_away_or_disabled(hass: HomeAssistant):
+    event = dt_util.utcnow() + timedelta(minutes=30)
+    _, coordinator, _ = await _setup_with_schedule(hass, event)
+    coordinator.preheat_enabled = False
+    await coordinator.async_update()
+    assert coordinator.preheat_active is False
+    assert coordinator.schedule_eco_active is True
+
+
+async def test_unavailable_schedule_keeps_normal_behaviour(hass: HomeAssistant):
+    _, coordinator, _ = await _setup_with_schedule(hass, None, state="unavailable")
+    await coordinator.async_update()
+    assert coordinator.schedule_eco_active is False
+    assert coordinator._determine_base_temperature(False) == coordinator.comfort_temp
+
+
+async def test_statistics_and_learning_are_exposed_and_persisted(hass: HomeAssistant):
+    entry, coordinator, _ = await _setup(hass, rated_power=2000)
+    with patch("custom_components.smart_climate_control.coordinator.asyncio.sleep", new=AsyncMock()):
+        hass.states.async_set(ROOM, "17.0", {"device_class": "temperature"})
+        await coordinator.async_update()
+    assert coordinator.stats.today.cycles == 1
+
+    assert hass.states.get("sensor.smart_climate_cycles_today").state == "1"
+    assert hass.states.get("sensor.smart_climate_cycle_diagnosis").state == "no_data"
+    assert hass.states.get("sensor.smart_climate_learned_heating_rate").state == "1.0"
+    assert hass.states.get("sensor.smart_climate_estimated_energy_today") is not None
+    assert hass.states.get("switch.smart_climate_preheat") is not None
+
+    coordinator.thermal.observe(5.0, 2.5)
+    await coordinator.async_save_state()
+    restored = type(coordinator)(hass, entry)
+    await restored.async_initialize()
+    assert restored.thermal.rate_for(5.0) == 2.5
+    assert restored.stats.today.cycles == 1
+    await restored.async_shutdown()

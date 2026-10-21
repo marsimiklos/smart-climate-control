@@ -31,6 +31,8 @@ from .const import (
     DEFAULT_CIRCULATE_INTERVAL, DEFAULT_CIRCULATE_DURATION, DEFAULT_CIRCULATE_FAN_SPEED,
     DEFAULT_ENABLE_VENTILATION, DEFAULT_SOLAR_DELAY, DEFAULT_SOLAR_BASE_THRESHOLD,
     DEFAULT_CONSUMPTION_THRESHOLD,
+    CONF_SCHEDULE, CONF_PREHEAT_MAX_MINUTES, CONF_HEAT_PUMP_POWER_SENSOR, CONF_RATED_POWER,
+    DEFAULT_PREHEAT_MAX_MINUTES, DEFAULT_RATED_POWER,
 )
 
 def _number(min_value: float, max_value: float, step: float, unit: str) -> selector.NumberSelector:
@@ -66,6 +68,8 @@ class SmartClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_BED_SENSORS): _entity(multiple=True, domain=["binary_sensor", "input_boolean"]),
             vol.Optional(CONF_SOLAR_SENSOR): _entity(domain="sensor", device_class="power"),
             vol.Optional(CONF_CONSUMPTION_SENSOR): _entity(domain="sensor", device_class="power"),
+            vol.Optional(CONF_SCHEDULE): _entity(domain="schedule"),
+            vol.Optional(CONF_HEAT_PUMP_POWER_SENSOR): _entity(domain="sensor", device_class="power"),
         })
         return self.async_show_form(step_id="user", data_schema=schema)
 
@@ -84,6 +88,8 @@ _BASE_NUMBERS = [
     (CONF_LOW_TEMP_THRESHOLD, DEFAULT_LOW_TEMP_THRESHOLD, _number(-20, 15, 1, "°C")),
     (CONF_SAFETY_CUTOFF, DEFAULT_SAFETY_CUTOFF, _number(0, 5, 0.1, "°C")),
     (CONF_COMFORT_OFFSET, 0.0, _number(0, 3, 0.1, "°C")),
+    (CONF_PREHEAT_MAX_MINUTES, DEFAULT_PREHEAT_MAX_MINUTES, _number(0, 360, 15, "min")),
+    (CONF_RATED_POWER, DEFAULT_RATED_POWER, _number(0, 10000, 50, "W")),
     (CONF_WEATHER_COMP_FACTOR, DEFAULT_WEATHER_COMP_FACTOR, _number(0, 2, 0.1, "")),
     (CONF_MAX_COMP_TEMP, DEFAULT_MAX_COMP_TEMP, _number(16, 35, 1, "°C")),
     (CONF_MIN_COMP_TEMP, DEFAULT_MIN_COMP_TEMP, _number(10, 25, 1, "°C")),
@@ -119,6 +125,8 @@ _BASE_ENTITIES = [
     (CONF_BED_SENSORS, True, {"domain": ["binary_sensor", "input_boolean"]}),
     (CONF_SOLAR_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
     (CONF_CONSUMPTION_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
+    (CONF_SCHEDULE, False, {"domain": "schedule"}),
+    (CONF_HEAT_PUMP_POWER_SENSOR, False, {"domain": "sensor", "device_class": "power"}),
 ]
 
 _VENT_ENTITIES = [
