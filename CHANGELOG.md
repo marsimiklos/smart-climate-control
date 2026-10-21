@@ -1,5 +1,7 @@
 # Changelog
 
+This fork continues from the original project's v3.0.
+
 ## 3.1.0
 
 ### Fixed

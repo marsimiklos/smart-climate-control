@@ -1,11 +1,13 @@
 # Smart Climate Control for Home Assistant
 
-[![Validate](https://github.com/smartthings54/smart-climate-control/actions/workflows/validate.yml/badge.svg)](https://github.com/smartthings54/smart-climate-control/actions/workflows/validate.yml)
+[![Validate](https://github.com/marsimiklos/smart-climate-control/actions/workflows/validate.yml/badge.svg)](https://github.com/marsimiklos/smart-climate-control/actions/workflows/validate.yml)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 
 A native Home Assistant integration that runs your heat pump / air conditioner and heat recovery ventilation (HRV) with a bit of intelligence: deadband control, weather compensation, solar surplus storage, presence and sleep detection, free cooling and humidity-driven ventilation.
 
 It started as a Node-RED flow and was rebuilt as an integration, so everything is configured from the Home Assistant UI instead of by editing flows.
+
+This is a fork of [smartthings54/smart-climate-control](https://github.com/smartthings54/smart-climate-control) that has since been heavily reworked: the control logic was restructured, several bugs were fixed, the documented presence and boost features were actually implemented, and tests and CI were added. See the [changelog](CHANGELOG.md). The name and entity names are unchanged, so it can replace the original in place.
 
 > Most of the code was written with the help of AI. My part is integration, testing, and making it work in my own setup. Please test it with your hardware before relying on it.
 
@@ -55,7 +57,7 @@ Everything else (outside sensor, solar, fans, presence, ...) is optional.
 ### HACS (recommended)
 
 1. HACS → three-dot menu → **Custom repositories**
-2. Add `https://github.com/smartthings54/smart-climate-control` as category **Integration**
+2. Add `https://github.com/marsimiklos/smart-climate-control` as category **Integration**
 3. Search for **Smart Climate Control**, download it and restart Home Assistant
 
 ### Manual
@@ -166,8 +168,8 @@ The decision logic that does not need Home Assistant lives in `custom_components
 
 ## Support
 
-- [Issues](https://github.com/smartthings54/smart-climate-control/issues)
-- [Discussions](https://github.com/smartthings54/smart-climate-control/discussions)
+- [Issues](https://github.com/marsimiklos/smart-climate-control/issues)
+- [Discussions](https://github.com/marsimiklos/smart-climate-control/discussions)
 
 ## License
 
